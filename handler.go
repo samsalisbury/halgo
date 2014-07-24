@@ -33,7 +33,8 @@ func write(w http.ResponseWriter, resource interface{}) {
 }
 
 func (s server) process(r *http.Request) (*response, error) {
-	if node, err := resolve(s.routes, r.URL.Path[1:], map[string]string{}); err != nil {
+	path := strings.Split(r.URL.Path[1:], "/")
+	if node, err := resolve(s.routes, path, map[string]string{}); err != nil {
 		return nil, err
 	} else {
 		return invoke_method(r.Method, node)
@@ -44,25 +45,32 @@ func invoke_method(method string, n resolved_node) (*response, error) {
 	return nil, Error("Not implemented.")
 }
 
-func resolve(n node, path string, values map[string]string) (resolved_node, error) {
-	if path == "" {
+func resolve(n node, path []string, values map[string]string) (resolved_node, error) {
+	if len(path) == 0 {
 		return resolved_node{n, values}, nil
 	} else {
-		parts := strings.SplitN(path, "/", 2)
-		if len(parts) == 2 {
-			return resolve_children(n.children, parts[0], parts[1], values)
-		} else {
-			return resolve_children(n.children, parts[0], "", values)
-		}
+		return resolve_children(n.children, path, values)
 	}
 }
 
-func resolve_children(r route, id string, path string, values map[string]string) (resolved_node, error) {
-	if node, ok := r[id]; ok {
-		values["x"] = id
-		return resolve(node, path, values)
+func (r route) child(name string) (node, bool) {
+	if n, ok := r[name]; ok {
+		return n, true
 	}
-	return resolved_node{}, Error404(id)
+	for _, n := range r {
+		if n.is_identity {
+			return n, true
+		}
+	}
+	return node{}, false
+}
+
+func resolve_children(r route, path []string, values map[string]string) (resolved_node, error) {
+	if node, ok := r.child(path[0]); ok {
+		return resolve(node, path[1:], values)
+	} else {
+		return resolved_node{}, Error404(path[0])
+	}
 }
 
 type response struct {

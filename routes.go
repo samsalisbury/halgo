@@ -12,8 +12,10 @@ type Resource interface {
 type route map[string]node
 
 type node struct {
-	getter   getter
-	children route
+	getter      getter
+	children    route
+	name        string
+	is_identity bool
 }
 
 func NewRoutes(root Resource) (node, error) {
@@ -23,7 +25,7 @@ func NewRoutes(root Resource) (node, error) {
 	} else if children, err := newChildren(root.ChildResources()); err != nil {
 		return node{}, err
 	} else {
-		return node{getter, children}, nil
+		return node{getter, children, "", false}, nil
 	}
 }
 
@@ -37,6 +39,7 @@ func newChildren(children []Resource) (route, error) {
 		} else if _, nameAlreadyExists := r[name]; nameAlreadyExists {
 			return route{}, Errorf("Conflicting routes found for %v", name)
 		} else {
+			node.name = name
 			r[name] = node
 		}
 	}

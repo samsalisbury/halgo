@@ -261,51 +261,6 @@ func add_parameter_spec(E error_method, m *method_spec, ordering *[]int, p named
 	}
 }
 
-// func add_parent_ids_spec(E error_method, m *method_spec, ordering *[]int, ctx method_context) error {
-// 	if yes, order, err := methodUsesParentIDs(E, ctx.method_type); err != nil {
-// 		return err
-// 	} else if yes {
-// 		if !p.ParentIDs.Allowed() {
-// 			return E(maynothave, parent_ids_param, parameter)
-// 		}
-// 		ordering = append(*ordering, order)
-// 		m.uses_parent_ids = true
-// 		numParams++
-// 	} else if p.ParentIDs.Required() {
-// 		return E(musthave, parent_ids_param, parameter)
-// 	}
-// }
-
-// func add_id_spec(E error_method, m *method_spec, ordering *[]int, ctx method_context) error {
-// 	if yes, order, err := methodUsesID(E, ctx.method_type); err != nil {
-// 		return err
-// 	} else if yes {
-// 		if !p.ID.Allowed() {
-// 			return E(maynothave, id_param, parameter)
-// 		}
-// 		ordering = append(*ordering, order)
-// 		m.uses_id = true
-// 		numParams++
-// 	} else if p.ID.Required() {
-// 		return E(musthave, id_param, parameter)
-// 	}
-// }
-
-// func add_payload_spec(E error_method, m *method_spec, ordering *[]int, ctx method_context) error {
-// 	if yes, order, err := methodUsesPayload(E, ctx.method_type, ctx.owner_pointer_type); err != nil {
-// 		return err
-// 	} else if yes {
-// 		if !p.ParentIDs.Allowed() {
-// 			return E(maynothave, payload_param, parameter)
-// 		}
-// 		ordering = append(*ordering, order)
-// 		m.uses_payload = true
-// 		numParams++
-// 	} else if p.Payload.Required() {
-// 		return E(musthave, payload_param)
-// 	}
-// }
-
 func parameter_order_correct(ordering []int) bool {
 	last := 0
 	for _, o := range ordering {

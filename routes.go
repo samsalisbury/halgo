@@ -50,7 +50,7 @@ func (p parameter_spec) maxParams() int {
 	return n
 }
 
-type generic_http_method func(parentID string, parentIDs map[string]string, payload interface{}) (interface{}, error)
+type generic_http_method func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error)
 
 var parameter_specs map[string]parameter_spec = map[string]parameter_spec{
 	handleHEAD:   parameter_spec{optional, optional, forbidden},
@@ -70,6 +70,13 @@ type node struct {
 	is_identity bool
 }
 
+func (n node) SupportsMethod(m string) bool {
+	if _, yes := n.methods[m]; yes {
+		return true
+	}
+	return false
+}
+
 func newNode(root Resource) (n node, err error) {
 	t := reflect.TypeOf(root)
 	if methods, err := getMethods(t); err != nil {
@@ -77,7 +84,13 @@ func newNode(root Resource) (n node, err error) {
 	} else if children, err := newRoutes(root.ChildResources()); err != nil {
 		return n, err
 	} else {
-		return node{methods, children, "", false}, nil
+		n = node{methods, children, "", false}
+		if yes, err := node_requires_id(n); err != nil {
+			return n, err
+		} else if yes {
+			n.is_identity = true
+		}
+		return n, nil
 	}
 }
 
@@ -98,7 +111,23 @@ func newRoutes(children []Resource) (r routes, err error) {
 	return r, nil
 }
 
-func getMethods(t reflect.Type) (map[string]*method_info, error) {
+type methods map[string]*method_info
+
+func node_requires_id(n node) (bool, error) {
+	really := []bool{}
+	for _, n := range n.methods {
+		really = append(really, n.spec.uses_id)
+	}
+	first_answer := really[0]
+	for _, r := range really[1:] {
+		if r != first_answer {
+			return false, Error(n.name, "requires ID parameter in some methods but not all. This is illegal.")
+		}
+	}
+	return first_answer, nil
+}
+
+func getMethods(t reflect.Type) (methods, error) {
 	m := map[string]*method_info{}
 	if getter, err := analyseGetter(t); err != nil {
 		return nil, err
@@ -128,7 +157,7 @@ type method_context struct {
 	method_type        reflect.Type
 }
 
-type error_method func(args ...interface{}) error
+type error_f func(args ...interface{}) error
 
 func analyseGetter(t reflect.Type) (m *method_info, err error) {
 	E := func(args ...interface{}) error { return methodError(t, handleGET, args...) }
@@ -144,7 +173,7 @@ func analyseGetter(t reflect.Type) (m *method_info, err error) {
 }
 
 func createMethod(spec method_spec, ctx method_context) (m *method_info, err error) {
-	f := func(id string, parentIDs map[string]string, payload interface{}) (interface{}, error) {
+	f := func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error) {
 		in := make([]reflect.Value, spec.numParams())
 		if spec.uses_parent_ids {
 			in = append(in, reflect.ValueOf(parentIDs))
@@ -156,7 +185,15 @@ func createMethod(spec method_spec, ctx method_context) (m *method_info, err err
 			in = append(in, reflect.ValueOf(payload))
 		}
 		out := ctx.bound_method.Call(in)
-		return out[0].Interface(), out[1].Interface().(error)
+		var resource interface{}
+		var err error
+		if !out[0].IsNil() {
+			resource = out[0].Interface()
+		}
+		if !out[1].IsNil() {
+			err = out[1].Interface().(error)
+		}
+		return resource, err
 	}
 	return &method_info{spec, ctx, f}, nil
 }
@@ -199,7 +236,7 @@ func (p named_parameter) FullName() string {
 }
 
 // TODO: Unmentalize this function to make it more understandable
-func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method_spec, error) {
+func analyseInputs(E error_f, ctx method_context, p parameter_spec) (method_spec, error) {
 	m := method_spec{}
 	if ctx.method_type.NumIn()-1 > p.maxParams() {
 		return m, E("may accept at most", p.maxParams(), "parameters")
@@ -240,7 +277,7 @@ func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method
 	return m, nil
 }
 
-func add_parameter_specs(E error_method, ordering *[]int, ctx method_context, params []named_parameter) error {
+func add_parameter_specs(E error_f, ordering *[]int, ctx method_context, params []named_parameter) error {
 	for _, p := range params {
 		if _, err := add_parameter_spec(E, p.toggle, ordering, ctx, p); err != nil {
 			return err
@@ -249,7 +286,7 @@ func add_parameter_specs(E error_method, ordering *[]int, ctx method_context, pa
 	return nil
 }
 
-func add_parameter_spec(E error_method, toggle *bool, ordering *[]int, ctx method_context, p named_parameter) (bool, error) {
+func add_parameter_spec(E error_f, toggle *bool, ordering *[]int, ctx method_context, p named_parameter) (bool, error) {
 	if added, order, err := methodHasExactlyOneParameterOfType(E, ctx.method_type, p.typ); err != nil {
 		return false, err
 	} else if p.req.Required() && !added {
@@ -268,7 +305,9 @@ func add_parameter_spec(E error_method, toggle *bool, ordering *[]int, ctx metho
 func parameter_order_correct(ordering []int) bool {
 	last := 0
 	for _, o := range ordering {
-		if o != last+1 {
+		Print("o=", o, "last=", last)
+		last++
+		if o != last {
 			return false
 		}
 	}
@@ -279,7 +318,7 @@ var (
 	string_T = reflect.TypeOf("")
 )
 
-func methodHasExactlyOneParameterOfType(E error_method, method_type reflect.Type, parameter_type reflect.Type) (bool, int, error) {
+func methodHasExactlyOneParameterOfType(E error_f, method_type reflect.Type, parameter_type reflect.Type) (bool, int, error) {
 	count := 0
 	pos := -1
 	for i := 0; i < method_type.NumIn(); i++ {
@@ -294,7 +333,7 @@ func methodHasExactlyOneParameterOfType(E error_method, method_type reflect.Type
 	return count == 1, pos, nil
 }
 
-func analyseOutputs(E error_method, ctx method_context) error {
+func analyseOutputs(E error_f, ctx method_context) error {
 	if ctx.method_type.NumOut() != 2 {
 		return E("should have 2 outputs")
 	} else if ctx.method_type.Out(0) != ctx.owner_pointer_type {

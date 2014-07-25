@@ -81,7 +81,7 @@ type AppResource struct {
 	Version string
 }
 
-func (AppResource) HandleGET(version string, parentIDs map[string]string) (*AppResource, error) {
+func (AppResource) HandleGET(parentIDs map[string]string, version string) (*AppResource, error) {
 	return nil, nil
 	// name := parentIDs["app"]
 	// if appResource, ok := the_apps[name]; !ok {

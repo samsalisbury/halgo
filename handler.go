@@ -19,6 +19,7 @@ type server struct {
 }
 
 func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	Print("request ", r.URL)
 	if res, err := s.process(r); err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(err.Error()))
@@ -34,22 +35,70 @@ func write(w http.ResponseWriter, resource interface{}) {
 
 func (s server) process(r *http.Request) (*response, error) {
 	path := strings.Split(r.URL.Path[1:], "/")
-	if node, err := resolve(s.routes, path, map[string]string{}); err != nil {
+	Print(path)
+	if n, err := resolve(s.routes, path, map[string]string{}); err != nil {
+		return nil, err
+	} else if m, ok := n.methods[r.Method]; !ok {
+		return nil, Error405(r.Method, n)
+	} else if prepared_request, err := prepare_request(r, n, m); err != nil {
 		return nil, err
 	} else {
-		return invoke_method(r.Method, node)
+		return invoke_method(n, m, prepared_request)
 	}
 }
 
-func invoke_method(method string, n resolved_node) (*response, error) {
-	return nil, Error("Not implemented.")
+type prepared_request struct {
+	parentIds map[string]string
+	id        string
+	payload   interface{}
+}
+
+func prepare_request(r *http.Request, n resolved_node, m *method_info) (*prepared_request, error) {
+	var (
+		parentIds map[string]string
+		id        string
+		payload   interface{}
+		err       error
+	)
+	if m.spec.uses_parent_ids {
+		parentIds = n.route_values
+	}
+	if m.spec.uses_id {
+		id = n.id
+	}
+	if m.spec.uses_payload {
+		payload, err = prepare_payload(r.Body, m.ctx.owner_pointer_type)
+	}
+	return &prepared_request{parentIds, id, payload}, err
+}
+
+//type generic_http_method func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error)
+func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*response, error) {
+	if resource, err := m.method(r.parentIds, r.id, r.payload); err != nil {
+		return nil, err
+	} else {
+		// TODO: Post-processing to add links
+		return &response{200, resource, nil}, nil
+	}
 }
 
 func resolve(n node, path []string, values map[string]string) (resolved_node, error) {
-	if len(path) == 0 {
-		return resolved_node{n, values}, nil
+	Print("resolve", path)
+	if len(path) == 1 {
+		return resolved_node{n, path[0], values}, nil
+	} else if len(path) == 0 {
+		return resolved_node{n, "", values}, nil
 	} else {
 		return resolve_children(n.children, path, values)
+	}
+}
+
+func resolve_children(r routes, path []string, values map[string]string) (resolved_node, error) {
+	Print("resolve_children", path)
+	if node, ok := r.child(path[0]); ok {
+		return resolve(node, path[1:], values)
+	} else {
+		return resolved_node{}, Error404(path[0])
 	}
 }
 
@@ -65,14 +114,6 @@ func (r routes) child(name string) (node, bool) {
 	return node{}, false
 }
 
-func resolve_children(r routes, path []string, values map[string]string) (resolved_node, error) {
-	if node, ok := r.child(path[0]); ok {
-		return resolve(node, path[1:], values)
-	} else {
-		return resolved_node{}, Error404(path[0])
-	}
-}
-
 type response struct {
 	status int
 	entity interface{}
@@ -83,5 +124,6 @@ type resolved_route []resolved_node
 
 type resolved_node struct {
 	node
+	id           string
 	route_values map[string]string
 }

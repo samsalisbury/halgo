@@ -1,4 +1,4 @@
-package main
+package halgo
 
 type RootResource struct {
 	Welcome string

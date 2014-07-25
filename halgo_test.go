@@ -1,9 +1,11 @@
-package main
+package halgo
 
-func main() {
+func Example() {
 	if server, err := NewServer(RootResource{}); err != nil {
 		Print(err)
 	} else {
 		Print(server)
 	}
+	// Output:
+	// not this!
 }

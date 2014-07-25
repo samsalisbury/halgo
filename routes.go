@@ -275,18 +275,6 @@ var (
 	string_T = reflect.TypeOf("")
 )
 
-func methodUsesID(E error_method, method_type reflect.Type) (bool, int, error) {
-	return methodHasExactlyOneParameterOfType(E, method_type, string_T)
-}
-
-func methodUsesParentIDs(E error_method, method_type reflect.Type) (bool, int, error) {
-	return methodHasExactlyOneParameterOfType(E, method_type, reflect.MapOf(string_T, string_T))
-}
-
-func methodUsesPayload(E error_method, method_type reflect.Type, payload_type reflect.Type) (bool, int, error) {
-	return methodHasExactlyOneParameterOfType(E, method_type, payload_type)
-}
-
 func methodHasExactlyOneParameterOfType(E error_method, method_type reflect.Type, parameter_type reflect.Type) (bool, int, error) {
 	count := 0
 	pos := -1

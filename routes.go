@@ -183,74 +183,128 @@ func (m method_spec) numParams() int {
 	return n
 }
 
+const parameter = " parameter"
+const musthave = "must specify a "
+const maynothave = "may not have a "
+
+type named_parameter struct {
+	req  requirement
+	name string
+	typ  reflect.Type
+}
+
+func (p *named_parameter) FullName() string {
+	return p.name + " " + p.typ.Name()
+}
+
 // TODO: Unmentalize this function to make it more understandable
 func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method_spec, error) {
+	var (
+		parameter_parent_ids = named_parameter{p.ParentIDs, "parentIDs", reflect.MapOf(string_T, string_T)}
+		parameter_id         = named_parameter{p.ID, "id", string_T}
+		parameter_payload    = named_parameter{p.Payload, "payload", ctx.owner_pointer_type}
+	)
 	m := method_spec{}
 	if ctx.method_type.NumIn()-1 > p.maxParams() {
 		return m, E("may accept at most", p.maxParams(), "parameters")
 	}
-	const parameter = " parameter"
-	const musthave = "must specify a "
-	const maynothave = "may not have a "
-	const id_param = "id string"
-	const parent_ids_param = "parentIDs map[string]string"
-	var payload_param = "payload " + ctx.owner_pointer_type.Name()
 	numParams := 0
 	ordering := []int{}
 	// The ordering of the 3 sections below is significant.
 	// It determines the accepted interfaces.
 	// TODO: find a way to make the ordering explicit.
-	if yes, order, err := methodUsesParentIDs(E, ctx.method_type); err != nil {
+	if added, err := add_parameter_spec(E, &m, &ordering, parameter_parent_ids, ctx); err != nil {
 		return m, err
-	} else if yes {
-		if !p.ParentIDs.Allowed() {
-			return m, E(maynothave, parent_ids_param, parameter)
-		}
-		ordering = append(ordering, order)
-		m.uses_parent_ids = true
+	} else if added {
 		numParams++
-	} else if p.ParentIDs.Required() {
-		return m, E(musthave, parent_ids_param, parameter)
 	}
-	if yes, order, err := methodUsesID(E, ctx.method_type); err != nil {
+	if added, err := add_parameter_spec(E, &m, &ordering, parameter_id, ctx); err != nil {
 		return m, err
-	} else if yes {
-		if !p.ID.Allowed() {
-			return m, E(maynothave, id_param, parameter)
-		}
-		ordering = append(ordering, order)
-		m.uses_id = true
+	} else if added {
 		numParams++
-	} else if p.ID.Required() {
-		return m, E(musthave, id_param, parameter)
 	}
-	if yes, order, err := methodUsesPayload(E, ctx.method_type, ctx.owner_pointer_type); err != nil {
+	if added, err := add_parameter_spec(E, &m, &ordering, parameter_payload, ctx); err != nil {
 		return m, err
-	} else if yes {
-		if !p.ParentIDs.Allowed() {
-			return m, E(maynothave, payload_param, parameter)
-		}
-		ordering = append(ordering, order)
-		m.uses_payload = true
+	} else if added {
 		numParams++
-	} else if p.Payload.Required() {
-		return m, E(musthave, payload_param)
 	}
+
 	if !parameter_order_correct(ordering) {
 		correct_order := []string{}
 		if m.uses_parent_ids {
-			correct_order = append(correct_order, parent_ids_param)
+			correct_order = append(correct_order, parameter_parent_ids.FullName())
 		}
 		if m.uses_id {
-			correct_order = append(correct_order, id_param)
+			correct_order = append(correct_order, parameter_id.FullName())
 		}
 		if m.uses_payload {
-			correct_order = append(correct_order, payload_param)
+			correct_order = append(correct_order, parameter_payload.FullName())
 		}
 		return m, E("Parameters out of order. Correct order is: " + strings.Join(correct_order, ", "))
 	}
 	return m, nil
 }
+
+func add_parameter_spec(E error_method, m *method_spec, ordering *[]int, p named_parameter, ctx method_context) (bool, error) {
+	if added, order, err := methodHasExactlyOneParameterOfType(E, ctx.method_type, p.typ); err != nil {
+		return false, err
+	} else if p.req.Required() && !added {
+		return false, E(musthave, p.FullName(), parameter)
+	} else if !added {
+		return false, nil
+	} else if !p.req.Allowed() {
+		return false, E(maynothave, p.FullName(), parameter)
+	} else {
+		*ordering = append(*ordering, order)
+		m.uses_parent_ids = true
+		return true, nil
+	}
+}
+
+// func add_parent_ids_spec(E error_method, m *method_spec, ordering *[]int, ctx method_context) error {
+// 	if yes, order, err := methodUsesParentIDs(E, ctx.method_type); err != nil {
+// 		return err
+// 	} else if yes {
+// 		if !p.ParentIDs.Allowed() {
+// 			return E(maynothave, parent_ids_param, parameter)
+// 		}
+// 		ordering = append(*ordering, order)
+// 		m.uses_parent_ids = true
+// 		numParams++
+// 	} else if p.ParentIDs.Required() {
+// 		return E(musthave, parent_ids_param, parameter)
+// 	}
+// }
+
+// func add_id_spec(E error_method, m *method_spec, ordering *[]int, ctx method_context) error {
+// 	if yes, order, err := methodUsesID(E, ctx.method_type); err != nil {
+// 		return err
+// 	} else if yes {
+// 		if !p.ID.Allowed() {
+// 			return E(maynothave, id_param, parameter)
+// 		}
+// 		ordering = append(*ordering, order)
+// 		m.uses_id = true
+// 		numParams++
+// 	} else if p.ID.Required() {
+// 		return E(musthave, id_param, parameter)
+// 	}
+// }
+
+// func add_payload_spec(E error_method, m *method_spec, ordering *[]int, ctx method_context) error {
+// 	if yes, order, err := methodUsesPayload(E, ctx.method_type, ctx.owner_pointer_type); err != nil {
+// 		return err
+// 	} else if yes {
+// 		if !p.ParentIDs.Allowed() {
+// 			return E(maynothave, payload_param, parameter)
+// 		}
+// 		ordering = append(*ordering, order)
+// 		m.uses_payload = true
+// 		numParams++
+// 	} else if p.Payload.Required() {
+// 		return E(musthave, payload_param)
+// 	}
+// }
 
 func parameter_order_correct(ordering []int) bool {
 	last := 0

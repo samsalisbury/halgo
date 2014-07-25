@@ -85,7 +85,3 @@ type resolved_node struct {
 	node
 	route_values map[string]string
 }
-
-func (f generic_http_method) Invoke(id string, parentIDs map[string]string, body []byte) (interface{}, error) {
-	return nil, Error("Not implemented.")
-}

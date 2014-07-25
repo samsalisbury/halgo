@@ -109,24 +109,6 @@ func getMethods(t reflect.Type) (map[string]*method_info, error) {
 	return m, nil
 }
 
-// func new_getter(caller reflect.Value) method {
-// 	getter := func(id string, parentIDs []string) (interface{}, error) {
-// 		in := make([]reflect.Value, len(parentIDs))
-// 		for i, a := range parentIDs {
-// 			in[i] = reflect.ValueOf(a)
-// 		}
-// 		returned := caller.Call(in)
-// 		var err error
-// 		if !returned[1].IsNil() {
-// 			err = returned[1].Interface().(error)
-// 		}
-// 		return returned[0].Interface(), err
-// 	}
-// 	return func(id string, parentIDs map[string]string, _ interface{}) (interface{}, error) {
-// 		return getter(id, parentIDs)
-// 	}
-// }
-
 func analyseMethodContext(t reflect.Type, name string) (method_context, bool) {
 	if method, method_exists := t.MethodByName(name); method_exists {
 		instance := reflect.New(t).Interface()
@@ -160,30 +142,6 @@ func analyseGetter(t reflect.Type) (m *method_info, err error) {
 		return createMethod(method_spec, ctx)
 	}
 }
-
-// func analyseGetInputs(E error_method, m reflect.Method) error {
-// 	numIn := m.Type.NumIn()
-// 	if numIn > 3 {
-// 		return E("may accept at most 2 parameters")
-// 	} else if numIn == 2 && m.Type.In(1) != reflect.String {
-// 		return E("if specified, first parameter must be string (ID) or map[string]string (Parent IDs)")
-// 	} else if numIn == 3 && m.Type.In(2) != reflect.MapOf(reflect.String, reflect.String) {
-// 		return E("if specified, second paremeter must be map[string]string (Parent IDs)")
-// 	}
-// 	switch numIn {
-// 	case 0:
-// 		return getter_no_inputs()
-// 	}
-// }
-
-// func createGetter(ctx method_context, E error_method) (method, error) {
-// 	if err, spec := analyseGetInputs(ctx.method_type); err != nil {
-// 		return E(err)
-// 	}
-// 	caller := reflect.ValueOf(v).MethodByName(handleGET)
-// 	getter := new_getter(caller)
-// 	return getter, nil
-// }
 
 func createMethod(spec method_spec, ctx method_context) (m *method_info, err error) {
 	f := func(id string, parentIDs map[string]string, payload interface{}) (interface{}, error) {
@@ -228,42 +186,49 @@ func (m method_spec) numParams() int {
 // TODO: Unmentalize this function to make it more understandable
 func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method_spec, error) {
 	m := method_spec{}
-	if ctx.method_type.NumIn() > p.maxParams() {
+	if ctx.method_type.NumIn()-1 > p.maxParams() {
 		return m, E("may accept at most", p.maxParams(), "parameters")
 	}
+	const parameter = " parameter"
 	const musthave = "must specify a "
 	const maynothave = "may not have a "
 	const id_param = "id string"
-	const parent_ids_param = "parentIDs map[string]string (ParentIDs)"
+	const parent_ids_param = "parentIDs map[string]string"
 	var payload_param = "payload " + ctx.owner_pointer_type.Name()
 	numParams := 0
 	ordering := []int{}
 	// The ordering of the 3 sections below is significant.
 	// It determines the accepted interfaces.
 	// TODO: find a way to make the ordering explicit.
-	if yes, order := methodUsesParentIDs(ctx.method_type); yes {
+	if yes, order, err := methodUsesParentIDs(E, ctx.method_type); err != nil {
+		return m, err
+	} else if yes {
 		if !p.ParentIDs.Allowed() {
-			return m, E(maynothave, parent_ids_param, " parameter")
+			return m, E(maynothave, parent_ids_param, parameter)
 		}
 		ordering = append(ordering, order)
 		m.uses_parent_ids = true
 		numParams++
 	} else if p.ParentIDs.Required() {
-		return m, E(musthave, parent_ids_param, " parameter")
+		return m, E(musthave, parent_ids_param, parameter)
 	}
-	if yes, order := methodUsesID(ctx.method_type); yes {
+	if yes, order, err := methodUsesID(E, ctx.method_type); err != nil {
+		return m, err
+	} else if yes {
 		if !p.ID.Allowed() {
-			return m, E(maynothave, id_param, " parameter")
+			return m, E(maynothave, id_param, parameter)
 		}
 		ordering = append(ordering, order)
 		m.uses_id = true
 		numParams++
 	} else if p.ID.Required() {
-		return m, E(musthave, id_param, " parameter")
+		return m, E(musthave, id_param, parameter)
 	}
-	if yes, order := methodUsesPayload(ctx.method_type, ctx.owner_pointer_type); yes {
+	if yes, order, err := methodUsesPayload(E, ctx.method_type, ctx.owner_pointer_type); err != nil {
+		return m, err
+	} else if yes {
 		if !p.ParentIDs.Allowed() {
-			return m, E(maynothave, payload_param, " parameter")
+			return m, E(maynothave, payload_param, parameter)
 		}
 		ordering = append(ordering, order)
 		m.uses_payload = true
@@ -282,7 +247,7 @@ func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method
 		if m.uses_payload {
 			correct_order = append(correct_order, payload_param)
 		}
-		return m, E("Parameters out of order. Correct order is: [" + strings.Join(correct_order, ",") + "]")
+		return m, E("Parameters out of order. Correct order is: " + strings.Join(correct_order, ", "))
 	}
 	return m, nil
 }
@@ -301,25 +266,31 @@ var (
 	string_T = reflect.TypeOf("")
 )
 
-func methodUsesID(method_type reflect.Type) (bool, int) {
-	return methodHasParameterOfType(method_type, string_T)
+func methodUsesID(E error_method, method_type reflect.Type) (bool, int, error) {
+	return methodHasExactlyOneParameterOfType(E, method_type, string_T)
 }
 
-func methodUsesParentIDs(method_type reflect.Type) (bool, int) {
-	return methodHasParameterOfType(method_type, reflect.MapOf(string_T, string_T))
+func methodUsesParentIDs(E error_method, method_type reflect.Type) (bool, int, error) {
+	return methodHasExactlyOneParameterOfType(E, method_type, reflect.MapOf(string_T, string_T))
 }
 
-func methodUsesPayload(method_type reflect.Type, payload_type reflect.Type) (bool, int) {
-	return methodHasParameterOfType(method_type, payload_type)
+func methodUsesPayload(E error_method, method_type reflect.Type, payload_type reflect.Type) (bool, int, error) {
+	return methodHasExactlyOneParameterOfType(E, method_type, payload_type)
 }
 
-func methodHasParameterOfType(method_type reflect.Type, parameter_type reflect.Type) (bool, int) {
+func methodHasExactlyOneParameterOfType(E error_method, method_type reflect.Type, parameter_type reflect.Type) (bool, int, error) {
+	count := 0
+	pos := -1
 	for i := 0; i < method_type.NumIn(); i++ {
 		if method_type.In(i) == parameter_type {
-			return true, i
+			count++
+			pos = i
 		}
 	}
-	return false, 0
+	if count > 1 {
+		return false, -1, E("has multiple", parameter_type, "parameters")
+	}
+	return count == 1, pos, nil
 }
 
 func analyseOutputs(E error_method, ctx method_context) error {

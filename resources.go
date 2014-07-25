@@ -81,7 +81,8 @@ type AppResource struct {
 	Version string
 }
 
-func (AppResource) HandleGET(name string, version string) (*AppResource, error) {
+func (AppResource) HandleGET(version string, parentIDs map[string]string) (*AppResource, error) {
+	name := parentIDs["app"]
 	if appResource, ok := the_apps[name]; !ok {
 		return nil, Error404(name)
 	} else if ver, ok := appResource.Apps[version]; !ok {

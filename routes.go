@@ -188,49 +188,44 @@ const musthave = "must specify a "
 const maynothave = "may not have a "
 
 type named_parameter struct {
-	req  requirement
-	name string
-	typ  reflect.Type
+	req    requirement
+	name   string
+	typ    reflect.Type
+	toggle *bool
 }
 
-func (p *named_parameter) FullName() string {
-	return p.name + " " + p.typ.Name()
+func (p named_parameter) FullName() string {
+	return p.name + " " + p.typ.String()
 }
 
 // TODO: Unmentalize this function to make it more understandable
 func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method_spec, error) {
-	var (
-		parameter_parent_ids = named_parameter{p.ParentIDs, "parentIDs", reflect.MapOf(string_T, string_T)}
-		parameter_id         = named_parameter{p.ID, "id", string_T}
-		parameter_payload    = named_parameter{p.Payload, "payload", ctx.owner_pointer_type}
-	)
 	m := method_spec{}
 	if ctx.method_type.NumIn()-1 > p.maxParams() {
 		return m, E("may accept at most", p.maxParams(), "parameters")
 	}
-	numParams := 0
 	ordering := []int{}
-	// The ordering of the 3 sections below is significant.
-	// It determines the accepted interfaces.
-	// TODO: find a way to make the ordering explicit.
-	if added, err := add_parameter_spec(E, &m, &ordering, parameter_parent_ids, ctx); err != nil {
-		return m, err
-	} else if added {
-		numParams++
-	}
-	if added, err := add_parameter_spec(E, &m, &ordering, parameter_id, ctx); err != nil {
-		return m, err
-	} else if added {
-		numParams++
-	}
-	if added, err := add_parameter_spec(E, &m, &ordering, parameter_payload, ctx); err != nil {
-		return m, err
-	} else if added {
-		numParams++
+
+	// This ordering is important. Only methods which have parameters
+	// corrsponding to this ordering are valid. Others will generate
+	// errors.
+	var (
+		parameter_parent_ids = named_parameter{p.ParentIDs, "parentIDs", reflect.MapOf(string_T, string_T), &m.uses_parent_ids}
+		parameter_id         = named_parameter{p.ID, "id", string_T, &m.uses_id}
+		parameter_payload    = named_parameter{p.Payload, "payload", ctx.owner_pointer_type, &m.uses_payload}
+	)
+	ordered_parameters := []named_parameter{
+		parameter_parent_ids,
+		parameter_id,
+		parameter_payload,
 	}
 
+	if err := add_parameter_specs(E, &ordering, ctx, ordered_parameters); err != nil {
+		return m, err
+	}
+
+	correct_order := []string{}
 	if !parameter_order_correct(ordering) {
-		correct_order := []string{}
 		if m.uses_parent_ids {
 			correct_order = append(correct_order, parameter_parent_ids.FullName())
 		}
@@ -240,12 +235,21 @@ func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method
 		if m.uses_payload {
 			correct_order = append(correct_order, parameter_payload.FullName())
 		}
-		return m, E("Parameters out of order. Correct order is: " + strings.Join(correct_order, ", "))
+		return m, E("Parameters out of order. Correct order is: (" + strings.Join(correct_order, ", ") + ")")
 	}
 	return m, nil
 }
 
-func add_parameter_spec(E error_method, m *method_spec, ordering *[]int, p named_parameter, ctx method_context) (bool, error) {
+func add_parameter_specs(E error_method, ordering *[]int, ctx method_context, params []named_parameter) error {
+	for _, p := range params {
+		if _, err := add_parameter_spec(E, p.toggle, ordering, ctx, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func add_parameter_spec(E error_method, toggle *bool, ordering *[]int, ctx method_context, p named_parameter) (bool, error) {
 	if added, order, err := methodHasExactlyOneParameterOfType(E, ctx.method_type, p.typ); err != nil {
 		return false, err
 	} else if p.req.Required() && !added {
@@ -256,7 +260,7 @@ func add_parameter_spec(E error_method, m *method_spec, ordering *[]int, p named
 		return false, E(maynothave, p.FullName(), parameter)
 	} else {
 		*ordering = append(*ordering, order)
-		m.uses_parent_ids = true
+		*toggle = true
 		return true, nil
 	}
 }

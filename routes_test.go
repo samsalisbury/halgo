@@ -73,3 +73,16 @@ func Test_TOO_MANY_GET_PARAMS(t *testing.T) {
 	_, err := newNode(TOO_MANY_GET_PARAMS{})
 	error_should_contain(t, err, "TOO_MANY_GET_PARAMS.HandleGET may accept at most 2 parameters")
 }
+
+/////
+
+type PARAMS_WRONG_ORDER struct{ test_base }
+
+func (PARAMS_WRONG_ORDER) HandleGET(string, map[string]string) (*PARAMS_WRONG_ORDER, error) {
+	return nil, nil
+}
+
+func Test_PARAMS_WRONG_ORDER(t *testing.T) {
+	_, err := newNode(PARAMS_WRONG_ORDER{})
+	error_should_contain(t, err, "PARAMS_WRONG_ORDER.HandleGET Parameters out of order. Correct order is: (parentIDs map[string]string, id string)")
+}

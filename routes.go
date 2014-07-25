@@ -30,6 +30,10 @@ func (r requirement) Allowed() bool {
 	return r == required || r == optional
 }
 
+func (r requirement) Required() bool {
+	return r == required
+}
+
 type parameter_spec struct {
 	ID        requirement
 	ParentIDs requirement
@@ -64,9 +68,6 @@ type node struct {
 	children    routes
 	name        string
 	is_identity bool
-}
-
-type methods struct {
 }
 
 func newNode(root Resource) (n node, err error) {
@@ -108,32 +109,32 @@ func getMethods(t reflect.Type) (map[string]method, error) {
 	return m, nil
 }
 
-func new_getter(caller reflect.Value) method {
-	getter := func(id string, parentIDs []string) (interface{}, error) {
-		in := make([]reflect.Value, len(parentIDs))
-		for i, a := range parentIDs {
-			in[i] = reflect.ValueOf(a)
-		}
-		returned := caller.Call(in)
-		var err error
-		if !returned[1].IsNil() {
-			err = returned[1].Interface().(error)
-		}
-		return returned[0].Interface(), err
-	}
-	return func(id string, parentIDs map[string]string, _ interface{}) (interface{}, error) {
-		return getter(id, parentIDs)
-	}
-}
+// func new_getter(caller reflect.Value) method {
+// 	getter := func(id string, parentIDs []string) (interface{}, error) {
+// 		in := make([]reflect.Value, len(parentIDs))
+// 		for i, a := range parentIDs {
+// 			in[i] = reflect.ValueOf(a)
+// 		}
+// 		returned := caller.Call(in)
+// 		var err error
+// 		if !returned[1].IsNil() {
+// 			err = returned[1].Interface().(error)
+// 		}
+// 		return returned[0].Interface(), err
+// 	}
+// 	return func(id string, parentIDs map[string]string, _ interface{}) (interface{}, error) {
+// 		return getter(id, parentIDs)
+// 	}
+// }
 
 func analyseMethodContext(t reflect.Type, name string) (method_context, bool) {
-	if method_type, method_exists := t.MethodByName(name); method_exists {
+	if method, method_exists := t.MethodByName(name); method_exists {
 		instance := reflect.New(t).Interface()
 		return method_context{
-			owner_pointer: reflect.TypeOf(instance),
-			bound_method:  reflect.ValueOf(instance).MethodByName(name),
-			method_type:   method_type,
-		}
+			owner_pointer_type: reflect.TypeOf(instance),
+			bound_method:       reflect.ValueOf(instance).MethodByName(name),
+			method_type:        method.Type,
+		}, true
 	} else {
 		return method_context{}, false
 	}
@@ -148,16 +149,20 @@ type method_context struct {
 type error_method func(args ...interface{}) error
 
 func analyseGetter(t reflect.Type) (method, error) {
-	E := func(args ...interface{}) error { return nil, methodError(t, handleGET, args...) }
+	E := func(args ...interface{}) error { return methodError(t, handleGET, args...) }
 	if ctx, ok := analyseMethodContext(t, handleGET); !ok {
 		return nil, nil
-	} else if err := analyseOutputs(E, ctx.method_type); err != nil {
+	} else if err := analyseOutputs(E, ctx); err != nil {
 		return nil, err
-	} else if method_spec, err := analyseInputs(E, ctx.method_type, parameter_specs[handleGET]); err != nil {
+	} else if method_spec, err := analyseInputs(E, ctx, parameter_specs[handleGET]); err != nil {
 		return nil, err
 	} else {
-		return createMethod(method_spec, ctx), nil
+		return createMethod(method_spec, ctx)
 	}
+}
+
+func createMethod(spec method_spec, ctx method_context) (method, error) {
+	return nil, Error("Not implemented.")
 }
 
 type method_spec struct {
@@ -166,7 +171,7 @@ type method_spec struct {
 	uses_payload   bool
 }
 
-func (m method_spec) numParams() {
+func (m method_spec) numParams() int {
 	n := 0
 	for _, v := range []bool{m.uses_id, m.uses_route_ids, m.uses_payload} {
 		if v {
@@ -207,7 +212,7 @@ func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method
 	} else if p.ParentIDs.Required() {
 		return m, E(musthave, parent_ids_param)
 	}
-	if methodUsesPayload(ctx.method_type) {
+	if methodUsesPayload(ctx.method_type, ctx.owner_pointer_type) {
 		if !p.ParentIDs.Allowed() {
 			return m, E(maynothave, payload_param)
 		} else {
@@ -216,77 +221,78 @@ func analyseInputs(E error_method, ctx method_context, p parameter_spec) (method
 		}
 	} else if p.Payload.Required() {
 		return m, E(musthave, payload_param)
-	} else {
-		// for parameter := 0; len(types) > 0 && parameter < numIn {
-		// 	// if method_type.In(parameter) != types[0] {
-		// 	// 	types := types[1:]
-		// 	// }
-		// }
 	}
+	return m, nil
 }
 
+var (
+	string_T = reflect.TypeOf("")
+)
+
 func methodUsesID(method_type reflect.Type) bool {
-	return methodHasParameterOfType(method_type, reflect.String)
+	return methodHasParameterOfType(method_type, string_T)
 }
 
 func methodUsesParentIDs(method_type reflect.Type) bool {
-	return methodHasParameterOfType(method_type, reflect.MapOf(reflect.String, reflect.String))
+	return methodHasParameterOfType(method_type, reflect.MapOf(string_T, string_T))
 }
 
-func methodUsesPayload(method_type reflect.Type) bool {
-	return methodHasParameterOfType(method_type, reflect.Interface)
+func methodUsesPayload(method_type reflect.Type, payload_type reflect.Type) bool {
+	return methodHasParameterOfType(method_type, payload_type)
 }
 
 func methodHasParameterOfType(method_type reflect.Type, parameter_type reflect.Type) bool {
-	for i = 0; i < method_type.NumIn(); i++ {
-		if method_type.In(i) == reflect.String {
+	for i := 0; i < method_type.NumIn(); i++ {
+		if method_type.In(i) == parameter_type {
 			return true
 		}
 	}
 	return false
 }
 
-func analyseGetInputs(m reflect.Method) error {
-	numIn = m.Type.NumIn()
-	if numIn > 3 {
-		return E("may accept at most 2 parameters")
-	} else if numIn == 2 && m.Type.In(1) != reflect.String {
-		return E("if specified, first parameter must be string (ID) or map[string]string (Parent IDs)")
-	} else if numIn == 3 && m.Type.In(2) != reflect.MapOf(reflect.String, reflect.String) {
-		return E("if specified, second paremeter must be map[string]string (Parent IDs)")
-	}
-	switch numIn {
-	case 0:
-		return getter_no_inputs()
-	}
-}
+// func analyseGetInputs(E error_method, m reflect.Method) error {
+// 	numIn := m.Type.NumIn()
+// 	if numIn > 3 {
+// 		return E("may accept at most 2 parameters")
+// 	} else if numIn == 2 && m.Type.In(1) != reflect.String {
+// 		return E("if specified, first parameter must be string (ID) or map[string]string (Parent IDs)")
+// 	} else if numIn == 3 && m.Type.In(2) != reflect.MapOf(reflect.String, reflect.String) {
+// 		return E("if specified, second paremeter must be map[string]string (Parent IDs)")
+// 	}
+// 	switch numIn {
+// 	case 0:
+// 		return getter_no_inputs()
+// 	}
+// }
 
-func createGetter(ctx method_context, E error_method) (method, error) {
-	if err := analyseGetInputs(ctx.method_type); err != nil {
-		return E(err)
-	}
-	caller := reflect.ValueOf(v).MethodByName(handleGET)
-	getter := new_getter(caller)
-	return getter, nil
-}
+// func createGetter(ctx method_context, E error_method) (method, error) {
+// 	if err, spec := analyseGetInputs(ctx.method_type); err != nil {
+// 		return E(err)
+// 	}
+// 	caller := reflect.ValueOf(v).MethodByName(handleGET)
+// 	getter := new_getter(caller)
+// 	return getter, nil
+// }
 
-func analyseOutputs(E error_method, m reflect.Method) error {
-	if m.Type.NumOut() != 2 {
+func analyseOutputs(E error_method, ctx method_context) error {
+	if ctx.method_type.NumOut() != 2 {
 		return E("does not have 2 outputs")
-	} else if m.Type.Out(0) != ptr {
-		return E("first output must be ", ptr)
-	} else if m.Type.Out(1).Name() != "error" {
+	} else if ctx.method_type.Out(0) != ctx.owner_pointer_type {
+		return E("first output must be ", ctx.owner_pointer_type)
+	} else if ctx.method_type.Out(1).Name() != "error" {
 		return E("second output must be error")
 	}
 	return nil
 }
 
-func routeError(args ...interface{}) {
+func routeError(args ...interface{}) error {
 	return Error("ROUTING: ", args)
 }
 
-func methodError(t reflect.Type, methodName string, args ...interface{}) {
-	return routeError(t.Name+"."+methodName+" ", args...)
+func methodError(t reflect.Type, methodName string, args ...interface{}) error {
+	prependage := t.Name() + "." + methodName + " "
+	args = append([]interface{}{prependage}, args...)
+	return routeError(args...)
 }
 
 func newPtrTo(t reflect.Type) interface{} {

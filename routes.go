@@ -305,8 +305,7 @@ func add_parameter_spec(E error_f, toggle *bool, ordering *[]int, ctx method_con
 func parameter_order_correct(ordering []int) bool {
 	last := 0
 	for _, o := range ordering {
-		Print("o=", o, "last=", last)
-		last++
+		last = last + 1
 		if o != last {
 			return false
 		}

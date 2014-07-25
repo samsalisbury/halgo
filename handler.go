@@ -7,7 +7,7 @@ import (
 )
 
 func NewServer(root Resource) (server, error) {
-	if routes, err := NewRoutes(root); err != nil {
+	if routes, err := newNode(root); err != nil {
 		return server{}, err
 	} else {
 		return server{routes}, nil
@@ -53,7 +53,7 @@ func resolve(n node, path []string, values map[string]string) (resolved_node, er
 	}
 }
 
-func (r route) child(name string) (node, bool) {
+func (r routes) child(name string) (node, bool) {
 	if n, ok := r[name]; ok {
 		return n, true
 	}
@@ -65,7 +65,7 @@ func (r route) child(name string) (node, bool) {
 	return node{}, false
 }
 
-func resolve_children(r route, path []string, values map[string]string) (resolved_node, error) {
+func resolve_children(r routes, path []string, values map[string]string) (resolved_node, error) {
 	if node, ok := r.child(path[0]); ok {
 		return resolve(node, path[1:], values)
 	} else {

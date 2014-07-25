@@ -84,21 +84,20 @@ func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*respo
 
 func resolve(n node, path []string, values map[string]string) (resolved_node, error) {
 	Print("resolve", path)
-	if len(path) == 1 {
-		return resolved_node{n, path[0], values}, nil
-	} else if len(path) == 0 {
+	if len(path) == 0 {
 		return resolved_node{n, "", values}, nil
-	} else {
-		return resolve_children(n.children, path, values)
 	}
+	return resolve_node(n, path[0], path[1:], values)
 }
 
-func resolve_children(r routes, path []string, values map[string]string) (resolved_node, error) {
-	Print("resolve_children", path)
-	if node, ok := r.child(path[0]); ok {
-		return resolve(node, path[1:], values)
+func resolve_node(n node, id string, path []string, values map[string]string) (resolved_node, error) {
+	Print("resolve_node", path)
+	if len(path) == 0 {
+		return resolved_node{n, id, values}, nil
+	} else if child, ok := n.children.child(id); !ok {
+		return resolved_node{}, Error404(id)
 	} else {
-		return resolved_node{}, Error404(path[0])
+		return resolve_node(child, path[0], path[1:], values)
 	}
 }
 
@@ -119,8 +118,6 @@ type response struct {
 	entity interface{}
 	links  map[string]string
 }
-
-type resolved_route []resolved_node
 
 type resolved_node struct {
 	node

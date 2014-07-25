@@ -294,9 +294,9 @@ func analyseOutputs(E error_method, ctx method_context) error {
 	if ctx.method_type.NumOut() != 2 {
 		return E("should have 2 outputs")
 	} else if ctx.method_type.Out(0) != ctx.owner_pointer_type {
-		return E("first output must be *" + ctx.owner_pointer_type.Elem().Name())
+		return E("first output must be *" + ctx.owner_pointer_type.Elem().Name() + " (not " + ctx.method_type.Out(0).Name() + ")")
 	} else if ctx.method_type.Out(1).Name() != "error" {
-		return E("second output must be error")
+		return E("second output must be error (not " + ctx.method_type.Out(1).Name() + "")
 	}
 	return nil
 }

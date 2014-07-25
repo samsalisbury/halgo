@@ -86,3 +86,29 @@ func Test_PARAMS_WRONG_ORDER(t *testing.T) {
 	_, err := newNode(PARAMS_WRONG_ORDER{})
 	error_should_contain(t, err, "PARAMS_WRONG_ORDER.HandleGET Parameters out of order. Correct order is: (parentIDs map[string]string, id string)")
 }
+
+/////
+
+type SINGLE_ID_PARAM struct{ test_base }
+
+func (SINGLE_ID_PARAM) HandleGET(string) (*SINGLE_ID_PARAM, error) {
+	return nil, nil
+}
+
+func Test_SINGLE_ID_PARAM(t *testing.T) {
+	_, err := newNode(SINGLE_ID_PARAM{})
+	error_should_be_nil(t, err)
+}
+
+///
+
+type SINGLE_PARENT_IDS_PARAM struct{ test_base }
+
+func (SINGLE_PARENT_IDS_PARAM) HandleGET(map[string]string) (*SINGLE_PARENT_IDS_PARAM, error) {
+	return nil, nil
+}
+
+func Test_SINGLE_PARENT_IDS_PARAM(t *testing.T) {
+	_, err := newNode(SINGLE_PARENT_IDS_PARAM{})
+	error_should_be_nil(t, err)
+}

@@ -84,14 +84,14 @@ type AppResource struct {
 
 func (AppResource) HandleGET(parentIDs map[string]string, version string) (*AppResource, error) {
 	return nil, nil
-	// name := parentIDs["app"]
-	// if appResource, ok := the_apps[name]; !ok {
-	// 	return nil, Error404(name)
-	// } else if ver, ok := appResource.Apps[version]; !ok {
-	// 	return nil, Error404(name)
-	// } else {
-	// 	return &ver, nil
-	// }
+	name := parentIDs["app"]
+	if appResource, ok := the_apps[name]; !ok {
+		return nil, Error404(name)
+	} else if ver, ok := appResource.Apps[version]; !ok {
+		return nil, Error404(name)
+	} else {
+		return &ver, nil
+	}
 }
 
 func (AppResource) ChildResources() []Resource {

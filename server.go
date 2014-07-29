@@ -51,7 +51,7 @@ func (s server) process(r *http.Request) (*response, error) {
 		println("Error preparing request")
 		return nil, err
 	} else {
-		println("Invoking method", m)
+		println("Invoking method", m.ctx.owner_pointer_type.Elem().Name(), r.Method)
 		return invoke_method(n, m, prepared_request)
 	}
 }

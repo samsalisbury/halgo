@@ -175,14 +175,21 @@ func analyseGetter(t reflect.Type) (m *method_info, err error) {
 func createMethod(spec method_spec, ctx method_context) (m *method_info, err error) {
 	f := func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error) {
 		in := make([]reflect.Value, spec.numParams())
+		i := 0
 		if spec.uses_parent_ids {
-			in = append(in, reflect.ValueOf(parentIDs))
+			println("uses_parent_ids")
+			in[i] = reflect.ValueOf(parentIDs)
+			i++
 		}
 		if spec.uses_id {
-			in = append(in, reflect.ValueOf(id))
+			println("uses_id")
+			in[i] = reflect.ValueOf(id)
+			i++
 		}
 		if spec.uses_payload {
-			in = append(in, reflect.ValueOf(payload))
+			println("uses_payload")
+			in[i] = reflect.ValueOf(payload)
+			i++
 		}
 		out := ctx.bound_method.Call(in)
 		var resource interface{}

@@ -92,13 +92,11 @@ func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*respo
 }
 
 func resolve_node(n node, id string, path []string, values map[string]string) (resolved_node, error) {
-	println("RESOLVE NODE:", strings.Join(path, "/"))
-
-	// This is root or a path ending in /
 	if id == "" && len(path) == 0 {
+		// This is root or a path ending in /
 		return resolved_node{n, id, values}, nil
 	}
-
+	values[n.name] = id
 	if child, ok := n.children.child(id); !ok {
 		return resolved_node{}, Error404(id)
 	} else if len(path) == 0 {

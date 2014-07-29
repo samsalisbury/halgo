@@ -46,7 +46,7 @@ func (AppsResource) HandleGET() (*AppsResource, error) {
 }
 
 func (AppsResource) ChildResources() []Resource {
-	return []Resource{AppResource{}}
+	return []Resource{AppVersionsResource{}}
 }
 
 type AppVersionsResource struct {
@@ -63,6 +63,10 @@ func (AppVersionsResource) HandleGET(name string) (*AppVersionsResource, error) 
 			Apps: appsResource.Apps,
 		}, nil
 	}
+}
+
+func (AppVersionsResource) ChildResources() []Resource {
+	return []Resource{AppResource{}}
 }
 
 var the_apps = map[string]AppVersionsResource{
@@ -83,12 +87,15 @@ type AppResource struct {
 }
 
 func (AppResource) HandleGET(parentIDs map[string]string, version string) (*AppResource, error) {
-	return nil, nil
-	name := parentIDs["app"]
+	println("PARENT IDS:")
+	for k, v := range parentIDs {
+		println("\t", k, "=", v)
+	}
+	name := parentIDs["apps"]
 	if appResource, ok := the_apps[name]; !ok {
 		return nil, Error404(name)
 	} else if ver, ok := appResource.Apps[version]; !ok {
-		return nil, Error404(name)
+		return nil, Error404(name + " v" + version)
 	} else {
 		return &ver, nil
 	}

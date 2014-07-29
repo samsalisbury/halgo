@@ -177,17 +177,14 @@ func createMethod(spec method_spec, ctx method_context) (m *method_info, err err
 		in := make([]reflect.Value, spec.numParams())
 		i := 0
 		if spec.uses_parent_ids {
-			println("uses_parent_ids")
 			in[i] = reflect.ValueOf(parentIDs)
 			i++
 		}
 		if spec.uses_id {
-			println("uses_id")
 			in[i] = reflect.ValueOf(id)
 			i++
 		}
 		if spec.uses_payload {
-			println("uses_payload")
 			in[i] = reflect.ValueOf(payload)
 			i++
 		}

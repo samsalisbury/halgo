@@ -39,9 +39,9 @@ func write(w http.ResponseWriter, r *response) {
 }
 
 func (s server) process(r *http.Request) (*response, error) {
-	path := strings.Split(r.URL.Path[1:], "/")[1:]
+	path := strings.Split(r.URL.Path[1:], "/")
 	println("PATH:", strings.Join(path, "/"))
-	if n, err := resolve(s.routes, path, map[string]string{}); err != nil {
+	if n, err := resolve_node(s.routes, path[0], path[1:], map[string]string{}); err != nil {
 		println("Not resolved", r.RequestURI)
 		return nil, err
 	} else if m, ok := n.methods[r.Method]; !ok {
@@ -91,17 +91,13 @@ func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*respo
 	}
 }
 
-func resolve(n node, path []string, values map[string]string) (resolved_node, error) {
-	println("RESOLVE:", len(path), strings.Join(path, "/"))
-	if len(path) == 0 {
-		println("===ROOT!!!===")
-		return resolved_node{n, "", values}, nil
-	}
-	return resolve_node(n, path[0], path[1:], values)
-}
-
 func resolve_node(n node, id string, path []string, values map[string]string) (resolved_node, error) {
 	println("RESOLVE NODE:", strings.Join(path, "/"))
+
+	// This is root or a path ending in /
+	if id == "" && len(path) == 0 {
+		return resolved_node{n, id, values}, nil
+	}
 
 	if child, ok := n.children.child(id); !ok {
 		return resolved_node{}, Error404(id)
@@ -110,14 +106,6 @@ func resolve_node(n node, id string, path []string, values map[string]string) (r
 	} else {
 		return resolve_node(child, path[0], path[1:], values)
 	}
-
-	// if len(path) == 0 {
-	// 	return resolved_node{n, id, values}, nil
-	// } else if child, ok := n.children.child(id); !ok {
-	// 	return resolved_node{}, Error404(id)
-	// } else {
-	// 	return resolve_node(child, path[0], path[1:], values)
-	// }
 }
 
 func (r routes) child(name string) (node, bool) {

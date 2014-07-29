@@ -1,7 +1,7 @@
 package halgo
 
 import (
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -20,29 +20,38 @@ type server struct {
 
 func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	Print("request ", r.URL)
-	if res, err := s.process(r); err != nil {
+	if response, err := s.process(r); err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(err.Error()))
 	} else {
-		write(w, res)
+		write(w, response)
 	}
 }
 
-func write(w http.ResponseWriter, resource interface{}) {
-	res := fmt.Sprint(resource)
-	w.Write([]byte(res))
+func write(w http.ResponseWriter, r *response) {
+	if buf, err := json.MarshalIndent(r.entity, "", "\t"); err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte(err.Error()))
+	} else {
+		w.WriteHeader(r.status)
+		w.Write(buf)
+	}
 }
 
 func (s server) process(r *http.Request) (*response, error) {
-	path := strings.Split(r.URL.Path[1:], "/")
-	Print(path)
+	path := strings.Split(r.URL.Path[1:], "/")[1:]
+	println("PATH:", strings.Join(path, "/"))
 	if n, err := resolve(s.routes, path, map[string]string{}); err != nil {
+		println("Not resolved", r.RequestURI)
 		return nil, err
 	} else if m, ok := n.methods[r.Method]; !ok {
+		println("Not supported method", r.RequestURI, r.Method)
 		return nil, Error405(r.Method, n)
 	} else if prepared_request, err := prepare_request(r, n, m); err != nil {
+		println("Error preparing request")
 		return nil, err
 	} else {
+		println("Invoking method", m)
 		return invoke_method(n, m, prepared_request)
 	}
 }
@@ -83,22 +92,32 @@ func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*respo
 }
 
 func resolve(n node, path []string, values map[string]string) (resolved_node, error) {
-	Print("resolve", path)
+	println("RESOLVE:", len(path), strings.Join(path, "/"))
 	if len(path) == 0 {
+		println("===ROOT!!!===")
 		return resolved_node{n, "", values}, nil
 	}
 	return resolve_node(n, path[0], path[1:], values)
 }
 
 func resolve_node(n node, id string, path []string, values map[string]string) (resolved_node, error) {
-	Print("resolve_node", path)
-	if len(path) == 0 {
-		return resolved_node{n, id, values}, nil
-	} else if child, ok := n.children.child(id); !ok {
+	println("RESOLVE NODE:", strings.Join(path, "/"))
+
+	if child, ok := n.children.child(id); !ok {
 		return resolved_node{}, Error404(id)
+	} else if len(path) == 0 {
+		return resolved_node{child, id, values}, nil
 	} else {
 		return resolve_node(child, path[0], path[1:], values)
 	}
+
+	// if len(path) == 0 {
+	// 	return resolved_node{n, id, values}, nil
+	// } else if child, ok := n.children.child(id); !ok {
+	// 	return resolved_node{}, Error404(id)
+	// } else {
+	// 	return resolve_node(child, path[0], path[1:], values)
+	// }
 }
 
 func (r routes) child(name string) (node, bool) {

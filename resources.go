@@ -12,6 +12,7 @@ func (RootResource) ChildResources() []Resource {
 }
 
 func (RootResource) HandleGET() (*RootResource, error) {
+	println("Root handler")
 	return &RootResource{
 		Welcome: "Welcome to the deployment service API",
 		Version: "0.0.110",

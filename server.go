@@ -50,13 +50,15 @@ func (s server) process(r *http.Request) (*response, error) {
 	} else if prepared_request, err := prepare_request(r, n, m); err != nil {
 		println("Error preparing request")
 		return nil, err
+	} else if response, err := invoke_method(n, m, prepared_request); err != nil {
+		return nil, err
 	} else {
-		println("Invoking method", m.ctx.owner_pointer_type.Elem().Name(), r.Method)
-		return invoke_method(n, m, prepared_request)
+		return response, nil
 	}
 }
 
 type prepared_request struct {
+	selfLink  string
 	parentIds map[string]string
 	id        string
 	payload   interface{}
@@ -78,7 +80,7 @@ func prepare_request(r *http.Request, n resolved_node, m *method_info) (*prepare
 	if m.spec.uses_payload {
 		payload, err = prepare_payload(r.Body, m.ctx.owner_pointer_type)
 	}
-	return &prepared_request{parentIds, id, payload}, err
+	return &prepared_request{r.URL.Path, parentIds, id, payload}, err
 }
 
 //type generic_http_method func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error)
@@ -86,8 +88,29 @@ func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*respo
 	if resource, err := m.method(r.parentIds, r.id, r.payload); err != nil {
 		return nil, err
 	} else {
-		// TODO: Post-processing to add links
-		return &response{200, resource, nil}, nil
+		return prepare_response(resource, r.selfLink)
+	}
+}
+
+func prepare_response(resource interface{}, selfLink string) (*response, error) {
+	if resource == nil {
+		return &response{404, nil, nil}, nil
+	} else if m, err := toMap(resource); err != nil {
+		return nil, err
+	} else {
+		m["_self"] = selfLink
+		return &response{200, m, nil}, nil
+	}
+}
+
+func toMap(resource interface{}) (map[string]interface{}, error) {
+	var v map[string]interface{}
+	if buf, err := json.Marshal(resource); err != nil {
+		return v, err
+	} else if err := json.Unmarshal(buf, &v); err != nil {
+		return v, err
+	} else {
+		return v, nil
 	}
 }
 

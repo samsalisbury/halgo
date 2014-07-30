@@ -121,12 +121,12 @@ func resolve_node(n node, id string, path []string, values map[string]string) (r
 		// This is root or a path ending in /
 		return resolved_node{n, id, values}, nil
 	}
-	values[n.name] = id
 	if child, ok := n.children.child(id); !ok {
 		return resolved_node{}, Error404(id)
 	} else if len(path) == 0 {
 		return resolved_node{child, id, values}, nil
 	} else {
+		values[child.name] = id
 		return resolve_node(child, path[0], path[1:], values)
 	}
 }

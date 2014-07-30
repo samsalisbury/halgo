@@ -3,8 +3,8 @@ package halgo
 type RootResource struct {
 	Welcome string  `json:"welcome"`
 	Version string  `json:"version"`
-	Apps    *Apps   `json:"apps" halgo:"expand-href"`
-	Health  *Health `json:"-"`
+	Apps    *Apps   `json:"apps" halgo:"expand-fields(numberOfApps, apps)"`
+	health  *Health `json:"-"`
 }
 
 func (RootResource) GET() (*RootResource, error) {
@@ -45,7 +45,7 @@ func (Apps) GET() (*Apps, error) {
 
 type App struct {
 	Name     string                `json:"name" halgo:"id"`
-	Versions map[string]AppVersion `json:"versions" halgo:"expand-href"`
+	Versions map[string]AppVersion `json:"versions"`
 }
 
 func (App) GET(name string) (*App, error) {

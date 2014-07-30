@@ -63,6 +63,7 @@ type routes map[string]node
 type node struct {
 	methods     map[string]*method_info
 	children    routes
+	expansions  map[string]expansion
 	name        string
 	is_identity bool
 }
@@ -75,19 +76,25 @@ func (n node) SupportsMethod(m string) bool {
 }
 
 func buildRoutes(root interface{}) (n node, err error) {
-	return newNode(reflect.TypeOf(root))
+	return newNode(child_resource{reflect.TypeOf(root), expansion{full, nil}})
 }
 
-func newNode(t reflect.Type) (n node, err error) {
-	println("newNode:", t.Name())
-	if methods, err := getMethods(t); err != nil {
+func newNode(r child_resource) (n node, err error) {
+	println("newNode:", r.Type.Name())
+	if methods, err := getMethods(r.Type); err != nil {
 		return n, err
 	} else if len(methods) == 0 {
-		return n, Error(t, "does not have any HTTP methods")
-	} else if children, err := newRoutes(getChildResources(t)); err != nil {
+		return n, Error(r.Type, "does not have any HTTP methods")
+	} else if child_resources, err := getChildResources(r.Type); err != nil {
+		return n, err
+	} else if children, err := newRoutes(child_resources); err != nil {
 		return n, err
 	} else {
-		n = node{methods, children, "", false}
+		expansions := map[string]expansion{}
+		for name, c := range child_resources {
+			expansions[name] = c.expansion
+		}
+		n = node{methods, children, expansions, "", false}
 		if yes, err := node_requires_id(n); err != nil {
 			return n, err
 		} else if yes {
@@ -97,10 +104,10 @@ func newNode(t reflect.Type) (n node, err error) {
 	}
 }
 
-func newRoutes(children []reflect.Type) (routes, error) {
+func newRoutes(children map[string]child_resource) (routes, error) {
 	r := routes{}
 	for _, c := range children {
-		fullname := c.Name()
+		fullname := c.Type.Name()
 		name := strings.ToLower(strings.TrimSuffix(fullname, "Resource"))
 		if node, err := newNode(c); err != nil {
 			return r, err
@@ -114,21 +121,27 @@ func newRoutes(children []reflect.Type) (routes, error) {
 	return r, nil
 }
 
-func hasNamedGetMethod(t reflect.Type) bool {
-	_, exists := t.MethodByName(GET)
-	return exists
+type expansion_type string
+
+const (
+	none   = expansion_type("none")
+	href   = expansion_type("href")
+	fields = expansion_type("fields")
+	full   = expansion_type("full")
+)
+
+type expansion struct {
+	expansion_type expansion_type
+	fields         []string
 }
 
-func assertIsResource(t reflect.Type) error {
-	if !hasNamedGetMethod(t) {
-		return Error(t.Name(), "does not have a method named", GET)
-	}
-	_, err := analyseGetter(t)
-	return err
+type child_resource struct {
+	Type      reflect.Type
+	expansion expansion
 }
 
-func getChildResources(t reflect.Type) []reflect.Type {
-	child_types := []reflect.Type{}
+func getChildResources(t reflect.Type) (map[string]child_resource, error) {
+	child_resources := map[string]child_resource{}
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		ft := f.Type
@@ -140,10 +153,53 @@ func getChildResources(t reflect.Type) []reflect.Type {
 		}
 
 		if hasNamedGetMethod(ft) {
-			child_types = append(child_types, ft)
+			if expansion, err := getFieldExpansion(f); err != nil {
+				return nil, err
+			} else {
+				child_resources[strings.ToLower(ft.Name())] = child_resource{ft, *expansion}
+			}
 		}
 	}
-	return child_types
+	return child_resources, nil
+}
+
+func getFieldExpansion(f reflect.StructField) (*expansion, error) {
+	if tag := f.Tag.Get("halgo"); tag == "" {
+		return &expansion{href, nil}, nil
+	} else if !strings.HasPrefix(tag, "expand-") {
+		return nil, Error("Malformed halgo tag: ", tag, " (tags must begin with 'expand-')")
+	} else {
+		tag = strings.TrimPrefix(tag, "expand-")
+		if tag == "none" {
+			return &expansion{none, nil}, nil
+		} else if tag == "href" {
+			return &expansion{href, nil}, nil
+		} else if tag == "full" {
+			return &expansion{full, nil}, nil
+		} else if strings.HasPrefix(tag, "fields(") && strings.HasSuffix(tag, ")") {
+			tag = strings.TrimSuffix(strings.TrimPrefix(tag, "fields("), ")")
+			the_fields := strings.Split(tag, ",")
+			for i, g := range the_fields {
+				the_fields[i] = strings.Trim(g, " \t")
+			}
+			return &expansion{fields, the_fields}, nil
+		} else {
+			return nil, Error("Malformed halgo tag: ", tag, " (expansion must be: 'none', 'href', 'all', or 'fields(comma, separated, fields)'' )")
+		}
+	}
+}
+
+func hasNamedGetMethod(t reflect.Type) bool {
+	_, exists := t.MethodByName(GET)
+	return exists
+}
+
+func assertIsResource(t reflect.Type) error {
+	if !hasNamedGetMethod(t) {
+		return Error(t.Name(), "does not have a method named", GET)
+	}
+	_, err := analyseGetter(t)
+	return err
 }
 
 type methods map[string]*method_info

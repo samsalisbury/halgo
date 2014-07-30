@@ -98,7 +98,9 @@ func prepare_response(resource interface{}, selfLink string) (*response, error) 
 	} else if m, err := toMap(resource); err != nil {
 		return nil, err
 	} else {
-		m["_self"] = selfLink
+		m["_links"] = map[string]string{
+			"self": selfLink,
+		}
 		return &response{200, m, nil}, nil
 	}
 }

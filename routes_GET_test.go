@@ -34,7 +34,7 @@ func (WRONG_FIRST_OUT_PARAMETER) HandleGET() (error, error) { return nil, nil }
 
 func Test_WRONG_FIRST_OUT_PARAMETER(t *testing.T) {
 	_, err := buildRoutes(WRONG_FIRST_OUT_PARAMETER{})
-	error_should_contain(t, err, "WRONG_FIRST_OUT_PARAMETER.HandleGET first output must be *WRONG_FIRST_OUT_PARAMETER (not error)")
+	error_should_contain(t, err, "WRONG_FIRST_OUT_PARAMETER.HandleGET first output must be *halgo.WRONG_FIRST_OUT_PARAMETER (not error)")
 }
 
 /////
@@ -58,7 +58,7 @@ func (FIRST_OUT_PARAM_NOT_POINTER) HandleGET() (FIRST_OUT_PARAM_NOT_POINTER, str
 
 func Test_FIRST_OUT_PARAM_NOT_POINTER(t *testing.T) {
 	_, err := buildRoutes(FIRST_OUT_PARAM_NOT_POINTER{})
-	error_should_contain(t, err, "FIRST_OUT_PARAM_NOT_POINTER.HandleGET first output must be *FIRST_OUT_PARAM_NOT_POINTER (not FIRST_OUT_PARAM_NOT_POINTER)")
+	error_should_contain(t, err, "FIRST_OUT_PARAM_NOT_POINTER.HandleGET first output must be *halgo.FIRST_OUT_PARAM_NOT_POINTER (not halgo.FIRST_OUT_PARAM_NOT_POINTER)")
 }
 
 /////

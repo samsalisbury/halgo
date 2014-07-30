@@ -1,6 +1,7 @@
 package halgo
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -132,6 +133,10 @@ func getChildResources(t reflect.Type) []reflect.Type {
 		if ft.Kind() == reflect.Ptr {
 			ft = ft.Elem()
 		}
+		if ft.Kind() == reflect.Map {
+			ft = ft.Elem()
+		}
+
 		if hasNamedGetMethod(ft) {
 			child_types = append(child_types, ft)
 		}
@@ -369,10 +374,17 @@ func methodHasExactlyOneParameterOfType(E error_f, method_type reflect.Type, par
 func analyseOutputs(E error_f, ctx method_context) error {
 	if ctx.method_type.NumOut() != 2 {
 		return E("should have 2 outputs")
-	} else if ctx.method_type.Out(0) != ctx.owner_pointer_type {
-		return E("first output must be *" + ctx.owner_type.Name() + " (not " + ctx.method_type.Out(0).Name() + ")")
-	} else if ctx.method_type.Out(1).Name() != "error" {
-		return E("second output must be error (not " + ctx.method_type.Out(1).Name() + "")
+	} else {
+		out1_t := ctx.method_type.Out(0)
+		out2_t := ctx.method_type.Out(1)
+		if out1_t != ctx.owner_pointer_type {
+			const format = "first output must be *%v (not %v)"
+			message := fmt.Sprintf(format, ctx.owner_type, out1_t)
+			return E(message)
+			// return E("first output must be *" + ctx.owner_type.Name() + " (not " + fmt.Sprint(out1_t) + ")")
+		} else if out2_t.Name() != "error" {
+			return E("second output must be error (not " + fmt.Sprint(out2_t) + "")
+		}
 	}
 	return nil
 }

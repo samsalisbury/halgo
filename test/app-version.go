@@ -6,7 +6,7 @@ type AppVersion struct {
 	Version string
 }
 
-func (AppVersion) HandleGET(parentIDs map[string]string, version string) (*AppVersion, error) {
+func (AppVersion) GET(parentIDs map[string]string, version string) (*AppVersion, error) {
 	println("PARENT IDS:")
 	for k, v := range parentIDs {
 		println("\t", k, "=", v)

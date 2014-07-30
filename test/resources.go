@@ -7,7 +7,7 @@ type RootResource struct {
 	Health  *HealthResource
 }
 
-func (RootResource) HandleGET() (*RootResource, error) {
+func (RootResource) GET() (*RootResource, error) {
 	println("Root handler")
 	return &RootResource{
 		Welcome: "Welcome to the deployment service API",
@@ -19,7 +19,7 @@ type HealthResource struct {
 	Hello string
 }
 
-func (HealthResource) HandleGET() (*HealthResource, error) {
+func (HealthResource) GET() (*HealthResource, error) {
 	return &HealthResource{
 		Hello: "Feelin' good!",
 	}, nil

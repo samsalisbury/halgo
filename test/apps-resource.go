@@ -5,7 +5,7 @@ type Apps struct {
 	Apps         []App
 }
 
-func (Apps) HandleGET() (*Apps, error) {
+func (Apps) GET() (*Apps, error) {
 	return &Apps{
 		NumberOfApps: len(the_apps),
 		Apps:         the_apps,

@@ -7,10 +7,10 @@ type RootResource struct {
 	Health  *Health `json:"-"`
 }
 
-func (RootResource) HandleGET() (*RootResource, error) {
+func (RootResource) GET() (*RootResource, error) {
 	println("Root handler")
 	a := Apps{}
-	if aa, err := a.HandleGET(); err != nil {
+	if aa, err := a.GET(); err != nil {
 		return nil, err
 	} else {
 		return &RootResource{
@@ -25,7 +25,7 @@ type Health struct {
 	Hello string
 }
 
-func (Health) HandleGET() (*Health, error) {
+func (Health) GET() (*Health, error) {
 	return &Health{
 		Hello: "Feelin' good!",
 	}, nil
@@ -36,7 +36,7 @@ type Apps struct {
 	Apps         map[string]App
 }
 
-func (Apps) HandleGET() (*Apps, error) {
+func (Apps) GET() (*Apps, error) {
 	return &Apps{
 		NumberOfApps: len(the_apps),
 		Apps:         the_apps,
@@ -48,8 +48,8 @@ type App struct {
 	Versions map[string]AppVersion
 }
 
-func (App) HandleGET(name string) (*App, error) {
-	println("App.HandleGET(", name, ")")
+func (App) GET(name string) (*App, error) {
+	println("App.GET(", name, ")")
 	if app, ok := the_apps[name]; !ok {
 		return nil, Error404(name)
 	} else {
@@ -77,7 +77,7 @@ type AppVersion struct {
 	Version string
 }
 
-func (AppVersion) HandleGET(parentIDs map[string]string, version string) (*AppVersion, error) {
+func (AppVersion) GET(parentIDs map[string]string, version string) (*AppVersion, error) {
 	println("PARENT IDS:")
 	for k, v := range parentIDs {
 		println("\t", k, "=", v)

@@ -15,7 +15,7 @@ func (RootResource) ChildResources() []halgo.Resource {
 	return []halgo.Resource{AppsResource{}, HealthResource{}}
 }
 
-func (RootResource) HandleGET() (*RootResource, error) {
+func (RootResource) GET() (*RootResource, error) {
 	return &RootResource{
 		Welcome: "Welcome to the deployment service API",
 		Version: "0.0.110",
@@ -26,7 +26,7 @@ type HealthResource struct {
 	Hello string
 }
 
-func (HealthResource) HandleGET() (*HealthResource, error) {
+func (HealthResource) GET() (*HealthResource, error) {
 	return &HealthResource{
 		Hello: "Feelin' good!",
 	}, nil
@@ -41,7 +41,7 @@ type AppsResource struct {
 	AppVersions  map[string]AppVersionsResource
 }
 
-func (AppsResource) HandleGET() (*AppsResource, error) {
+func (AppsResource) GET() (*AppsResource, error) {
 	return &AppsResource{
 		NumberOfApps: len(the_apps),
 		AppVersions:  the_apps,
@@ -57,7 +57,7 @@ type App struct {
 	Apps map[string]AppVersion
 }
 
-func (App) HandleGET(name string) (*App, error) {
+func (App) GET(name string) (*App, error) {
 	if appsResource, ok := the_apps[name]; !ok {
 		return nil, halgo.Error404(name)
 	} else {
@@ -85,7 +85,7 @@ type AppResource struct {
 	Version string
 }
 
-func (AppResource) HandleGET(parentIDs map[string]string, version string) (*AppResource, error) {
+func (AppResource) GET(parentIDs map[string]string, version string) (*AppResource, error) {
 	return nil, nil
 	// name := parentIDs["app"]
 	// if appResource, ok := the_apps[name]; !ok {

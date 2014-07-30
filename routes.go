@@ -7,12 +7,12 @@ import (
 )
 
 const (
-	handleHEAD   = "HandleHEAD"
-	handleGET    = "HandleGET"
-	handleDELETE = "HandleDELETE"
-	handlePUT    = "HandlePUT"
-	handlePATCH  = "HandlePATCH"
-	handlePOST   = "HandlePOST"
+	HEAD   = "HEAD"
+	GET    = "GET"
+	DELETE = "DELETE"
+	PUT    = "PUT"
+	PATCH  = "PATCH"
+	POST   = "POST"
 )
 
 type requirement int
@@ -50,12 +50,12 @@ func (p parameter_spec) maxParams() int {
 type generic_http_method func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error)
 
 var parameter_specs map[string]parameter_spec = map[string]parameter_spec{
-	handleHEAD:   parameter_spec{optional, optional, forbidden},
-	handleGET:    parameter_spec{optional, optional, forbidden},
-	handleDELETE: parameter_spec{required, optional, forbidden},
-	handlePUT:    parameter_spec{required, optional, required},
-	handlePATCH:  parameter_spec{required, optional, required},
-	handlePOST:   parameter_spec{optional, optional, required},
+	HEAD:   parameter_spec{optional, optional, forbidden},
+	GET:    parameter_spec{optional, optional, forbidden},
+	DELETE: parameter_spec{required, optional, forbidden},
+	PUT:    parameter_spec{required, optional, required},
+	PATCH:  parameter_spec{required, optional, required},
+	POST:   parameter_spec{optional, optional, required},
 }
 
 type routes map[string]node
@@ -82,6 +82,8 @@ func newNode(t reflect.Type) (n node, err error) {
 	println("newNode:", t.Name())
 	if methods, err := getMethods(t); err != nil {
 		return n, err
+	} else if len(methods) == 0 {
+		return n, Error(t, "does not have any HTTP methods")
 	} else if children, err := newRoutes(getChildResources(t)); err != nil {
 		return n, err
 	} else {
@@ -113,13 +115,13 @@ func newRoutes(children []reflect.Type) (routes, error) {
 }
 
 func hasNamedGetMethod(t reflect.Type) bool {
-	_, exists := t.MethodByName(handleGET)
+	_, exists := t.MethodByName(GET)
 	return exists
 }
 
 func assertIsResource(t reflect.Type) error {
 	if !hasNamedGetMethod(t) {
-		return Error(t.Name(), "does not have a method named", handleGET)
+		return Error(t.Name(), "does not have a method named", GET)
 	}
 	_, err := analyseGetter(t)
 	return err
@@ -195,12 +197,12 @@ type method_context struct {
 type error_f func(args ...interface{}) error
 
 func analyseGetter(t reflect.Type) (m *method_info, err error) {
-	E := func(args ...interface{}) error { return methodError(t, handleGET, args...) }
-	if ctx, ok := analyseMethodContext(t, handleGET); !ok {
+	E := func(args ...interface{}) error { return methodError(t, GET, args...) }
+	if ctx, ok := analyseMethodContext(t, GET); !ok {
 		return m, nil
 	} else if err := analyseOutputs(E, ctx); err != nil {
 		return m, err
-	} else if method_spec, err := analyseInputs(E, ctx, parameter_specs[handleGET]); err != nil {
+	} else if method_spec, err := analyseInputs(E, ctx, parameter_specs[GET]); err != nil {
 		return m, err
 	} else {
 		return createMethod(method_spec, ctx)

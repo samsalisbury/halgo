@@ -3,22 +3,18 @@ package halgo
 type RootResource struct {
 	Welcome string  `json:"welcome"`
 	Version string  `json:"version"`
-	Apps    *Apps   `json:"apps" halgo:"expand-fields(numberOfApps, apps)"`
+	Apps    *Apps   `json:"apps" halgo:"expand-full"`
 	health  *Health `json:"-"`
 }
 
 func (RootResource) GET() (*RootResource, error) {
 	println("Root handler")
-	a := Apps{}
-	if aa, err := a.GET(); err != nil {
-		return nil, err
-	} else {
-		return &RootResource{
-			Welcome: "Welcome to the deployment service API",
-			Version: "0.0.110",
-			Apps:    aa,
-		}, nil
-	}
+
+	return &RootResource{
+		Welcome: "Welcome to the deployment service API",
+		Version: "0.0.110",
+		Apps:    nil,
+	}, nil
 }
 
 type Health struct {

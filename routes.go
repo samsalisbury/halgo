@@ -76,7 +76,7 @@ func (n node) SupportsMethod(m string) bool {
 }
 
 func buildRoutes(root interface{}) (n node, err error) {
-	return newNode(child_resource{reflect.TypeOf(root), expansion{full, nil}, false, false})
+	return newNode(child_resource{reflect.TypeOf(root), expansion{full, nil, false, false}})
 }
 
 func newNode(r child_resource) (n node, err error) {
@@ -133,13 +133,13 @@ const (
 type expansion struct {
 	expansion_type expansion_type
 	fields         []string
+	isMap          bool
+	isSlice        bool
 }
 
 type child_resource struct {
 	Type      reflect.Type
 	expansion expansion
-	isMap     bool
-	isSlice   bool
 }
 
 func getChildResources(t reflect.Type) (map[string]child_resource, error) {
@@ -151,12 +151,8 @@ func getChildResources(t reflect.Type) (map[string]child_resource, error) {
 		if ft.Kind() == reflect.Ptr {
 			ft = ft.Elem()
 		}
-		if ft.Kind() == reflect.Map {
+		if ft.Kind() == reflect.Map || ft.Kind() == reflect.Slice {
 			ft = ft.Elem()
-			cr.isMap = true
-		} else if ft.Kind() == reflect.Slice {
-			ft = ft.Elem()
-			cr.isSlice = true
 		}
 		cr.Type = ft
 		if hasNamedGetMethod(cr.Type) {
@@ -174,27 +170,33 @@ func getChildResources(t reflect.Type) (map[string]child_resource, error) {
 }
 
 func getFieldExpansion(f reflect.StructField) (*expansion, error) {
+	isMap, isSlice := false, false
+	if f.Type.Kind() == reflect.Map {
+		isMap = true
+	} else if f.Type.Kind() == reflect.Slice {
+		isSlice = true
+	}
 	if tag := f.Tag.Get("halgo"); tag == "" {
-		return &expansion{href, nil}, nil
+		return &expansion{href, nil, isMap, isSlice}, nil
 	} else if !strings.HasPrefix(tag, "expand-") {
 		return nil, Error("Malformed halgo tag: ", tag, " (tags must begin with 'expand-')")
 	} else {
 		tag = strings.TrimPrefix(tag, "expand-")
 		if tag == "none" {
-			return &expansion{none, nil}, nil
+			return &expansion{none, nil, isMap, isSlice}, nil
 		} else if tag == "href" {
-			return &expansion{href, nil}, nil
+			return &expansion{href, nil, isMap, isSlice}, nil
 		} else if tag == "full" {
-			return &expansion{full, nil}, nil
+			return &expansion{full, nil, isMap, isSlice}, nil
 		} else if strings.HasPrefix(tag, "fields(") && strings.HasSuffix(tag, ")") {
 			tag = strings.TrimSuffix(strings.TrimPrefix(tag, "fields("), ")")
 			the_fields := strings.Split(tag, ",")
 			for i, g := range the_fields {
 				the_fields[i] = strings.Trim(g, " \t")
 			}
-			return &expansion{fields, the_fields}, nil
+			return &expansion{fields, the_fields, isMap, isSlice}, nil
 		} else {
-			return nil, Error("Malformed halgo tag: ", tag, " (expansion must be: 'none', 'href', 'all', or 'fields(comma, separated, fields)'' )")
+			return nil, Error("Malformed halgo tag: ", tag, " (expansion must be: 'none', 'href', 'full', or 'fields(comma, separated, fields)'' )")
 		}
 	}
 }

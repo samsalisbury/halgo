@@ -3,7 +3,7 @@ package halgo
 type RootResource struct {
 	Welcome string  `json:"welcome"`
 	Version string  `json:"version"`
-	Apps    *Apps   `json:"apps" halgo:"expand,small"`
+	Apps    *Apps   `json:"apps" halgo:"expand-href"`
 	Health  *Health `json:"-"`
 }
 
@@ -32,8 +32,8 @@ func (Health) GET() (*Health, error) {
 }
 
 type Apps struct {
-	NumberOfApps int
-	Apps         map[string]App
+	NumberOfApps int            `json:"numberOfApps"`
+	Apps         map[string]App `json:"apps" halgo:"expand-full"`
 }
 
 func (Apps) GET() (*Apps, error) {
@@ -44,8 +44,8 @@ func (Apps) GET() (*Apps, error) {
 }
 
 type App struct {
-	Name     string
-	Versions map[string]AppVersion
+	Name     string                `json:"name" halgo:"id"`
+	Versions map[string]AppVersion `json:"versions" halgo:"expand-href"`
 }
 
 func (App) GET(name string) (*App, error) {
@@ -72,9 +72,9 @@ var the_apps = map[string]App{
 }
 
 type AppVersion struct {
-	ID      string
-	Name    string
-	Version string
+	ID      string `json:"id" halgo:"id"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 func (AppVersion) GET(parentIDs map[string]string, version string) (*AppVersion, error) {

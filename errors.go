@@ -32,7 +32,7 @@ func Error404(what string) HTTPError {
 }
 
 func Error405(method string, n resolved_node) HTTPError {
-	return HttpError(405, method+"not supported.")
+	return HttpError(405, method+" not supported.")
 }
 
 func Errorf(format string, args ...interface{}) error {

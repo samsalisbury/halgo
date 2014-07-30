@@ -76,7 +76,7 @@ func (n node) SupportsMethod(m string) bool {
 }
 
 func buildRoutes(root interface{}) (n node, err error) {
-	return newNode(child_resource{reflect.TypeOf(root), expansion{full, nil}})
+	return newNode(child_resource{reflect.TypeOf(root), expansion{full, nil}, false, false})
 }
 
 func newNode(r child_resource) (n node, err error) {
@@ -138,11 +138,14 @@ type expansion struct {
 type child_resource struct {
 	Type      reflect.Type
 	expansion expansion
+	isMap     bool
+	isSlice   bool
 }
 
 func getChildResources(t reflect.Type) (map[string]child_resource, error) {
 	child_resources := map[string]child_resource{}
 	for i := 0; i < t.NumField(); i++ {
+		cr := child_resource{}
 		f := t.Field(i)
 		ft := f.Type
 		if ft.Kind() == reflect.Ptr {
@@ -150,13 +153,20 @@ func getChildResources(t reflect.Type) (map[string]child_resource, error) {
 		}
 		if ft.Kind() == reflect.Map {
 			ft = ft.Elem()
+			cr.isMap = true
+		} else if ft.Kind() == reflect.Slice {
+			ft = ft.Elem()
+			cr.isSlice = true
 		}
-
-		if hasNamedGetMethod(ft) {
+		cr.Type = ft
+		if hasNamedGetMethod(cr.Type) {
 			if expansion, err := getFieldExpansion(f); err != nil {
 				return nil, err
 			} else {
-				child_resources[strings.ToLower(ft.Name())] = child_resource{ft, *expansion}
+				cr.expansion = *expansion
+				// TODO: Use field name instead of type for map id
+				// TODO: Also do this with paths
+				child_resources[strings.ToLower(cr.Type.Name())] = cr
 			}
 		}
 	}

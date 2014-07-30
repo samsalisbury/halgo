@@ -52,18 +52,18 @@ func (AppsResource) ChildResources() []halgo.Resource {
 	return []halgo.Resource{AppResource{}}
 }
 
-type AppVersionsResource struct {
+type App struct {
 	Name string
-	Apps map[string]AppResource
+	Apps map[string]AppVersion
 }
 
-func (AppVersionsResource) HandleGET(name string) (*AppVersionsResource, error) {
+func (App) HandleGET(name string) (*App, error) {
 	if appsResource, ok := the_apps[name]; !ok {
 		return nil, halgo.Error404(name)
 	} else {
-		return &AppVersionsResource{
-			Name: name,
-			Apps: appsResource.Apps,
+		return &App{
+			Name:     name,
+			Versions: appsResource.Versions,
 		}, nil
 	}
 }
@@ -71,7 +71,7 @@ func (AppVersionsResource) HandleGET(name string) (*AppVersionsResource, error) 
 var the_apps = map[string]AppVersionsResource{
 	"test-app": AppVersionsResource{
 		Name: "test-app",
-		Apps: map[string]AppResource{
+		Versions: map[string]App{
 			"0.2.0": AppResource{"test-app-0-2-0", "test-app", "0.2.0"},
 			"1.2.3": AppResource{"test-app-1-2-3", "test-app", "1.2.3"},
 			"1.3.9": AppResource{"test-app-1-3-9", "test-app", "1.3.9"},

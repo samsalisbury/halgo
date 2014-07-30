@@ -18,7 +18,3 @@ func error_should_be_nil(t *testing.T, err error) {
 		t.Errorf("Expected nil error but got \n\t'%v'", err)
 	}
 }
-
-type test_base struct{}
-
-func (test_base) ChildResources() []Resource { return nil }

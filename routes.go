@@ -14,10 +14,6 @@ const (
 	handlePOST   = "HandlePOST"
 )
 
-type Resource interface {
-	ChildResources() []Resource
-}
-
 type requirement int
 
 const (
@@ -77,11 +73,15 @@ func (n node) SupportsMethod(m string) bool {
 	return false
 }
 
-func newNode(root Resource) (n node, err error) {
-	t := reflect.TypeOf(root)
+func buildRoutes(root interface{}) (n node, err error) {
+	return newNode(reflect.TypeOf(root))
+}
+
+func newNode(t reflect.Type) (n node, err error) {
+	println("newNode:", t.Name())
 	if methods, err := getMethods(t); err != nil {
 		return n, err
-	} else if children, err := newRoutes(root.ChildResources()); err != nil {
+	} else if children, err := newRoutes(getChildResources(t)); err != nil {
 		return n, err
 	} else {
 		n = node{methods, children, "", false}
@@ -94,10 +94,10 @@ func newNode(root Resource) (n node, err error) {
 	}
 }
 
-func newRoutes(children []Resource) (r routes, err error) {
-	r = routes{}
+func newRoutes(children []reflect.Type) (routes, error) {
+	r := routes{}
 	for _, c := range children {
-		fullname := reflect.TypeOf(c).Name()
+		fullname := c.Name()
 		name := strings.ToLower(strings.TrimSuffix(fullname, "Resource"))
 		if node, err := newNode(c); err != nil {
 			return r, err
@@ -109,6 +109,34 @@ func newRoutes(children []Resource) (r routes, err error) {
 		}
 	}
 	return r, nil
+}
+
+func hasNamedGetMethod(t reflect.Type) bool {
+	_, exists := t.MethodByName(handleGET)
+	return exists
+}
+
+func assertIsResource(t reflect.Type) error {
+	if !hasNamedGetMethod(t) {
+		return Error(t.Name(), "does not have a method named", handleGET)
+	}
+	_, err := analyseGetter(t)
+	return err
+}
+
+func getChildResources(t reflect.Type) []reflect.Type {
+	child_types := []reflect.Type{}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		ft := f.Type
+		if ft.Kind() == reflect.Ptr {
+			ft = ft.Elem()
+		}
+		if hasNamedGetMethod(ft) {
+			child_types = append(child_types, ft)
+		}
+	}
+	return child_types
 }
 
 type methods map[string]*method_info
@@ -142,6 +170,7 @@ func analyseMethodContext(t reflect.Type, name string) (method_context, bool) {
 	if method, method_exists := t.MethodByName(name); method_exists {
 		instance := reflect.New(t).Interface()
 		return method_context{
+			owner_type:         reflect.TypeOf(instance).Elem(),
 			owner_pointer_type: reflect.TypeOf(instance),
 			bound_method:       reflect.ValueOf(instance).MethodByName(name),
 			method_type:        method.Type,
@@ -152,6 +181,7 @@ func analyseMethodContext(t reflect.Type, name string) (method_context, bool) {
 }
 
 type method_context struct {
+	owner_type         reflect.Type
 	owner_pointer_type reflect.Type
 	bound_method       reflect.Value
 	method_type        reflect.Type
@@ -340,7 +370,7 @@ func analyseOutputs(E error_f, ctx method_context) error {
 	if ctx.method_type.NumOut() != 2 {
 		return E("should have 2 outputs")
 	} else if ctx.method_type.Out(0) != ctx.owner_pointer_type {
-		return E("first output must be *" + ctx.owner_pointer_type.Elem().Name() + " (not " + ctx.method_type.Out(0).Name() + ")")
+		return E("first output must be *" + ctx.owner_type.Name() + " (not " + ctx.method_type.Out(0).Name() + ")")
 	} else if ctx.method_type.Out(1).Name() != "error" {
 		return E("second output must be error (not " + ctx.method_type.Out(1).Name() + "")
 	}

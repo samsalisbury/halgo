@@ -7,10 +7,6 @@ type RootResource struct {
 	Health  *HealthResource
 }
 
-func (RootResource) ChildResources() []Resource {
-	return []Resource{AppsResource{}, HealthResource{}}
-}
-
 func (RootResource) HandleGET() (*RootResource, error) {
 	println("Root handler")
 	return &RootResource{
@@ -29,10 +25,6 @@ func (HealthResource) HandleGET() (*HealthResource, error) {
 	}, nil
 }
 
-func (HealthResource) ChildResources() []Resource {
-	return nil
-}
-
 type AppsResource struct {
 	NumberOfApps int
 	AppVersions  map[string]AppVersionsResource
@@ -43,10 +35,6 @@ func (AppsResource) HandleGET() (*AppsResource, error) {
 		NumberOfApps: len(the_apps),
 		AppVersions:  the_apps,
 	}, nil
-}
-
-func (AppsResource) ChildResources() []Resource {
-	return []Resource{AppVersionsResource{}}
 }
 
 type AppVersionsResource struct {
@@ -63,10 +51,6 @@ func (AppVersionsResource) HandleGET(name string) (*AppVersionsResource, error) 
 			Apps: appsResource.Apps,
 		}, nil
 	}
-}
-
-func (AppVersionsResource) ChildResources() []Resource {
-	return []Resource{AppResource{}}
 }
 
 var the_apps = map[string]AppVersionsResource{
@@ -99,8 +83,4 @@ func (AppResource) HandleGET(parentIDs map[string]string, version string) (*AppR
 	} else {
 		return &ver, nil
 	}
-}
-
-func (AppResource) ChildResources() []Resource {
-	return nil
 }

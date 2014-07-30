@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-func NewServer(root Resource) (server, error) {
-	if routes, err := newNode(root); err != nil {
+func NewServer(root interface{}) (server, error) {
+	if routes, err := buildRoutes(root); err != nil {
 		return server{}, err
 	} else {
 		return server{routes}, nil

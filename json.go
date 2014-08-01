@@ -8,7 +8,7 @@ import (
 )
 
 func prepare_payload(body io.ReadCloser, t reflect.Type) (interface{}, error) {
-	v := newPtrTo(t)
+	v := reflect.New(t)
 	defer body.Close()
 	if buf, err := ioutil.ReadAll(body); err != nil {
 		return nil, err

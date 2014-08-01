@@ -8,7 +8,7 @@ import (
 )
 
 func NewServer(root interface{}) (server, error) {
-	if routes, err := buildRoutes(root); err != nil {
+	if routes, err := buildGraph(root); err != nil {
 		return server{}, err
 	} else {
 		return server{routes}, nil
@@ -21,7 +21,7 @@ type server struct {
 
 func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	Print("request ", r.URL)
-	if response, err := s.process(r); err != nil {
+	if response, err := s.process_request(r); err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(err.Error()))
 	} else {
@@ -39,24 +39,107 @@ func write(w http.ResponseWriter, r *response) {
 	}
 }
 
-func (s server) process(r *http.Request) (*response, error) {
+func (s server) process_request(r *http.Request) (*response, error) {
 	path := strings.Split(r.URL.Path[1:], "/")
-	println("PATH:", strings.Join(path, "/"))
-	if n, err := resolve_node(nil, s.routes, path[0], path[1:], map[string]string{}); err != nil {
-		println("Not resolved", r.RequestURI)
+	if node, err := s.routes.Resolve(path...); err != nil {
 		return nil, err
-	} else if m, ok := n.methods[r.Method]; !ok {
-		println("Not supported method", r.RequestURI, r.Method)
-		return nil, Error405(r.Method, n)
-	} else if prepared_request, err := prepare_request(r.URL.Path, r.Body, n, m); err != nil {
-		println("Error preparing request")
+	} else if node == nil {
+		return nil, Error404(r.URL.Path)
+	} else if method, ok := node.BindMethod(r.Method); !ok {
+		return nil, Error405(r.Method, node)
+	} else if err := method.SetPayload(r.Body); err != nil {
 		return nil, err
-	} else if response, err := invoke_method(n, m, prepared_request); err != nil {
+	} else if entity, err := method.Invoke(); err != nil {
+		return nil, err
+	} else if response, err := prepare_response(node, entity); err != nil {
 		return nil, err
 	} else {
 		return response, nil
 	}
 }
+
+func (m *bound_method) Invoke() (interface{}, error) {
+	ids := m.node.RouteIDs()
+	if entity, err := m.method(ids, m.node.url_value, m.payload); err != nil {
+		return nil, err
+	} else {
+		return entity, nil
+	}
+}
+
+func (n *resolved_node) BindMethod(name string) (*bound_method, bool) {
+	if m, ok := n.methods[name]; !ok {
+		return nil, false
+	} else {
+		return &bound_method{m, n, nil}, true
+	}
+}
+
+func (m *bound_method) SetPayload(body io.ReadCloser) error {
+	if !m.spec.uses_payload {
+		return nil
+	}
+	if payload, err := prepare_payload(body, m.ctx.owner_pointer_type); err != nil {
+		return err
+	} else {
+		m.payload = payload
+		return nil
+	}
+}
+
+type bound_method struct {
+	*method_info
+	node    *resolved_node
+	payload interface{}
+}
+
+func (n *resolved_node) RouteIDs() map[string]string {
+	ids := map[string]string{}
+	for n.parent != nil {
+		if n.parent.is_identity {
+			ids[n.parent.url_name] = n.parent.url_value
+		}
+	}
+	return ids
+}
+
+// func prepare_request(path string, body io.ReadCloser, n resolved_node, m *method_info) (*prepared_request, error) {
+// 	var (
+// 		parentIds map[string]string
+// 		id        string
+// 		payload   interface{}
+// 		err       error
+// 	)
+// 	if m.spec.uses_parent_ids {
+// 		parentIds = n.route_values
+// 	}
+// 	if m.spec.uses_id {
+// 		id = n.id
+// 	}
+// 	if m.spec.uses_payload {
+// 		payload, err = prepare_payload(body, m.ctx.owner_pointer_type)
+// 	}
+// 	return &prepared_request{path, parentIds, id, payload}, err
+// }
+
+// func (s server) process(r *http.Request) (*response, error) {
+// 	path := strings.Split(r.URL.Path[1:], "/")
+// 	println("PATH:", strings.Join(path, "/"))
+// 	if n, err := resolve_node(nil, s.routes, path[0], path[1:], map[string]string{}); err != nil {
+// 		println("Not resolved", r.RequestURI)
+// 		return nil, err
+// 	} else if m, ok := n.methods[r.Method]; !ok {
+// 		println("Not supported method", r.RequestURI, r.Method)
+// 		return nil, Error405(r.Method, n)
+// 	} else if prepared_request, err := prepare_request(r.URL.Path, r.Body, n, m); err != nil {
+// 		println("Error preparing request")
+// 		return nil, err
+// 	} else if response, err := invoke_method(n, m, prepared_request); err != nil {
+// 		return nil, err
+// 	} else {
+// 		return response, nil
+// 	}
+// }
 
 type prepared_request struct {
 	selfLink  string
@@ -65,87 +148,85 @@ type prepared_request struct {
 	payload   interface{}
 }
 
-func prepare_request(path string, body io.ReadCloser, n resolved_node, m *method_info) (*prepared_request, error) {
-	var (
-		parentIds map[string]string
-		id        string
-		payload   interface{}
-		err       error
-	)
-	if m.spec.uses_parent_ids {
-		parentIds = n.route_values
-	}
-	if m.spec.uses_id {
-		id = n.id
-	}
-	if m.spec.uses_payload {
-		payload, err = prepare_payload(body, m.ctx.owner_pointer_type)
-	}
-	return &prepared_request{path, parentIds, id, payload}, err
-}
-
 //type generic_http_method func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error)
-func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*response, error) {
-	if resource, err := m.method(r.parentIds, r.id, r.payload); err != nil {
-		return nil, err
-	} else {
-		return prepare_response(n, resource, r.selfLink)
-	}
-}
+// func invoke_method(n resolved_node, m *method_info, r *prepared_request) (*response, error) {
+// 	if resource, err := m.method(r.parentIds, r.id, r.payload); err != nil {
+// 		return nil, err
+// 	} else {
+// 		return prepare_response(n, resource, r.selfLink)
+// 	}
+// }
 
-func prepare_response(n resolved_node, resource interface{}, selfLink string) (*response, error) {
+func prepare_response(n *resolved_node, resource interface{}) (*response, error) {
 	if resource == nil {
 		return &response{404, nil, nil}, nil
 	} else if m, err := toMap(resource); err != nil {
 		return nil, err
-	} else if err := append_embedded_resources(n, &m); err != nil {
-		return nil, err
 	} else {
+		append_embedded_resources(n, &m)
 		return &response{200, &m, nil}, nil
 	}
 }
 
-func append_embedded_resources(n resolved_node, m *map[string]interface{}) error {
-	for name, e := range n.expansions {
+func append_embedded_resources(n *resolved_node, m *map[string]interface{}) {
+	for _, c := range n.children {
+		e := c.expansion
+		name := c.node.url_name
+		var err error = nil
+		var entity interface{} = nil
 		if e.isMap {
-			return append_child_map(name, n, m)
+			entity, err = create_child_map(name, n)
 		} else if e.isSlice {
-			return append_child_slice(name, n, m)
+			entity, err = create_child_slice(name, n)
 		} else {
-			if e.expansion_type == href {
-				(*m)[name] = map[string]string{"_self": n.Path() + "/" + name}
-			} else {
-				sub_resource := get_sub_resource(n, name)
-				(*m)[name] = sub_resource
-				return nil
-			}
+			entity, err = create_named_child(e.expansion_type, name, n)
+		}
+		if err != nil {
+			(*m)[name] = map[string]string{"error": err.Error()}
+		} else {
+			(*m)[name] = entity
 		}
 	}
-	return nil
 }
 
-func append_child_map(name string, n resolved_node, m *map[string]interface{}) error {
-	(*m)[name] = "Child maps not yet implemented."
-	return nil
-}
-
-func append_child_slice(name string, n resolved_node, m *map[string]interface{}) error {
-	(*m)[name] = "Child slices not yet implemented."
-	return nil
-}
-
-func get_sub_resource(n resolved_node, name string) interface{} {
-	if sub_node, ok := n.Resolve(name); !ok {
-		return nil
-	} else {
-		println("sub_node: ", sub_node.name, ":", sub_node.id)
-		if sub_request, err := prepare_request(n.Path()+"/"+name, nil, *sub_node, sub_node.methods[GET]); err != nil {
-			return map[string]string{"error": "Error preparing sub-request: " + err.Error()}
-		} else if sub_response, err := invoke_method(*sub_node, sub_node.methods[GET], sub_request); err != nil {
-			return map[string]string{"error": "Unable to get sub-resource: " + err.Error()}
+func create_named_child(et expansion_type, name string, n *resolved_node) (interface{}, error) {
+	if et == href {
+		return map[string]string{"_self": n.Path() + "/" + name}, nil
+	} else if et == full {
+		if r, err := n.Resolve(name); err != nil {
+			return nil, err
 		} else {
-			return sub_response.entity
+			method, _ := r.BindMethod("GET")
+			return method.Invoke()
 		}
+	} else {
+		return nil, Error("fields(...) filter not yet implemented.")
+	}
+}
+
+func create_child_map(name string, n *resolved_node) (map[string]interface{}, error) {
+	return nil, Error("Child maps not yet implemented.")
+}
+
+func create_child_slice(name string, n *resolved_node) ([]interface{}, error) {
+	return nil, Error("Child slices not yet implemented.")
+}
+
+func get_sub_resource(n *resolved_node, name string) (interface{}, error) {
+	if node, err := n.Resolve(name); err != nil {
+		return nil, err
+	} else {
+		println("sub_node: ", node.url_name, ":", node.url_value)
+
+		return node.methods[GET].method(n.RouteIDs(), n.RouteID(), nil)
+
+		// if sub_request, err := prepare_request(n.Path()+"/"+name, nil, *sub_node, sub_node.methods[GET]); err != nil {
+		// 	return map[string]string{"error": "Error preparing sub-request: " + err.Error()}
+		// } else if sub_response, err := invoke_method(*sub_node, sub_node.methods[GET], sub_request); err != nil {
+		// 	return map[string]string{"error": "Unable to get sub-resource: " + err.Error()}
+		// } else {
+		// 	return sub_response.entity
+		// }
 	}
 }
 
@@ -160,33 +241,33 @@ func toMap(resource interface{}) (map[string]interface{}, error) {
 	}
 }
 
-func resolve_node(parent *resolved_node, n node, id string, path []string, values map[string]string) (resolved_node, error) {
-	if id == "" && len(path) == 0 {
-		// This is root or a path ending in /
-		return resolved_node{n, id, values, parent}, nil
-	}
-	if child, ok := n.children.child(id); !ok {
-		return resolved_node{}, Error404(id)
-	} else if len(path) == 0 {
-		return resolved_node{child, id, values, parent}, nil
-	} else {
-		values[child.name] = id
-		parent = &resolved_node{child, id, values, parent}
-		return resolve_node(parent, child, path[0], path[1:], values)
-	}
-}
+// func resolve_node(parent *resolved_node, n node, id string, path []string, values map[string]string) (resolved_node, error) {
+// 	if id == "" && len(path) == 0 {
+// 		// This is root or a path ending in /
+// 		return resolved_node{n, id, values, parent}, nil
+// 	}
+// 	if child, ok := n.children.child(id); !ok {
+// 		return resolved_node{}, Error404(id)
+// 	} else if len(path) == 0 {
+// 		return resolved_node{child, id, values, parent}, nil
+// 	} else {
+// 		values[child.name] = id
+// 		parent = &resolved_node{child, id, values, parent}
+// 		return resolve_node(parent, child, path[0], path[1:], values)
+// 	}
+// }
 
-func (r routes) child(name string) (node, bool) {
-	if n, ok := r[name]; ok {
-		return n, true
-	}
-	for _, n := range r {
-		if n.is_identity {
-			return n, true
-		}
-	}
-	return node{}, false
-}
+// func (r routes) child(name string) (node, bool) {
+// 	if n, ok := r[name]; ok {
+// 		return n, true
+// 	}
+// 	for _, n := range r {
+// 		if n.is_identity {
+// 			return n, true
+// 		}
+// 	}
+// 	return node{}, false
+// }
 
 type response struct {
 	status int
@@ -194,42 +275,35 @@ type response struct {
 	links  map[string]string
 }
 
-type resolved_node struct {
-	node
-	id           string
-	route_values map[string]string
-	parent       *resolved_node
-}
-
 func (n *resolved_node) Path() string {
 	p := ""
 	for n != nil {
-		p = "/" + n.id + p
+		p = "/" + n.RouteID() + p
 		n = n.parent
 	}
 	return p
 }
 
 func (n *resolved_node) RouteID() string {
-	if n.id != "" {
-		return n.id
+	if n.url_value != "" {
+		return n.url_value
 	} else {
-		return n.name
+		return n.url_name
 	}
 }
 
-func (n *resolved_node) Resolve(childID string) (*resolved_node, bool) {
-	println("resolved_node.Resolve(", childID, ")")
-	if c, ok := n.children.child(childID); !ok {
-		return nil, false
-	} else {
-		values := n.route_values
-		values[n.name] = n.RouteID()
-		return &resolved_node{
-			c,
-			childID,
-			values,
-			n,
-		}, true
-	}
-}
+// func (n *resolved_node) Resolve(childID string) (*resolved_node, bool) {
+// 	println("resolved_node.Resolve(", childID, ")")
+// 	if c, ok := n.children.child(childID); !ok {
+// 		return nil, false
+// 	} else {
+// 		values := n.route_values
+// 		values[n.name] = n.RouteID()
+// 		return &resolved_node{
+// 			c,
+// 			childID,
+// 			values,
+// 			n,
+// 		}, true
+// 	}
+// }

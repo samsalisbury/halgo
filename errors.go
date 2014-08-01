@@ -31,7 +31,7 @@ func Error404(what string) HTTPError {
 	return HttpError(404, what+" not found.")
 }
 
-func Error405(method string, n resolved_node) HTTPError {
+func Error405(method string, n *resolved_node) HTTPError {
 	return HttpError(405, method+" not supported.")
 }
 

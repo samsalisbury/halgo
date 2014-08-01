@@ -6,199 +6,12 @@ import (
 	"strings"
 )
 
-const (
-	HEAD   = "HEAD"
-	GET    = "GET"
-	DELETE = "DELETE"
-	PUT    = "PUT"
-	PATCH  = "PATCH"
-	POST   = "POST"
-)
-
-type requirement int
-
-const (
-	required  requirement = iota
-	optional              = iota
-	forbidden             = iota
-)
-
-func (r requirement) Allowed() bool {
-	return r == required || r == optional
-}
-
-func (r requirement) Required() bool {
-	return r == required
-}
-
-type parameter_spec struct {
-	ID        requirement
-	ParentIDs requirement
-	Payload   requirement
-}
-
-func (p parameter_spec) maxParams() int {
-	n := 0
-	for _, r := range []requirement{p.ID, p.ParentIDs, p.Payload} {
-		if r.Allowed() {
-			n++
-		}
-	}
-	return n
-}
-
 type generic_http_method func(parentIDs map[string]string, id string, payload interface{}) (interface{}, error)
 
-var parameter_specs map[string]parameter_spec = map[string]parameter_spec{
-	HEAD:   parameter_spec{optional, optional, forbidden},
-	GET:    parameter_spec{optional, optional, forbidden},
-	DELETE: parameter_spec{required, optional, forbidden},
-	PUT:    parameter_spec{required, optional, required},
-	PATCH:  parameter_spec{required, optional, required},
-	POST:   parameter_spec{optional, optional, required},
-}
-
-type routes map[string]node
-
-type node struct {
-	methods     map[string]*method_info
-	children    routes
-	expansions  map[string]expansion
-	name        string
-	is_identity bool
-}
-
-func (n node) SupportsMethod(m string) bool {
-	if _, yes := n.methods[m]; yes {
-		return true
-	}
-	return false
-}
-
-func buildRoutes(root interface{}) (n node, err error) {
-	return newNode(child_resource{reflect.TypeOf(root), expansion{full, nil, false, false}})
-}
-
-func newNode(r child_resource) (n node, err error) {
-	println("newNode:", r.Type.Name())
-	if methods, err := getMethods(r.Type); err != nil {
-		return n, err
-	} else if len(methods) == 0 {
-		return n, Error(r.Type, "does not have any HTTP methods")
-	} else if child_resources, err := getChildResources(r.Type); err != nil {
-		return n, err
-	} else if children, err := newRoutes(child_resources); err != nil {
-		return n, err
-	} else {
-		expansions := map[string]expansion{}
-		for name, c := range child_resources {
-			expansions[name] = c.expansion
-		}
-		n = node{methods, children, expansions, "", false}
-		if yes, err := node_requires_id(n); err != nil {
-			return n, err
-		} else if yes {
-			n.is_identity = true
-		}
-		return n, nil
-	}
-}
-
-func newRoutes(children map[string]child_resource) (routes, error) {
-	r := routes{}
-	for _, c := range children {
-		fullname := c.Type.Name()
-		name := strings.ToLower(strings.TrimSuffix(fullname, "Resource"))
-		if node, err := newNode(c); err != nil {
-			return r, err
-		} else if _, nameAlreadyExists := r[name]; nameAlreadyExists {
-			return r, Errorf("Conflicting routes found for %v", name)
-		} else {
-			node.name = name
-			r[name] = node
-		}
-	}
-	return r, nil
-}
-
-type expansion_type string
-
-const (
-	none   = expansion_type("none")
-	href   = expansion_type("href")
-	fields = expansion_type("fields")
-	full   = expansion_type("full")
-)
-
-type expansion struct {
-	expansion_type expansion_type
-	fields         []string
-	isMap          bool
-	isSlice        bool
-}
-
-type child_resource struct {
-	Type      reflect.Type
-	expansion expansion
-}
-
-func getChildResources(t reflect.Type) (map[string]child_resource, error) {
-	child_resources := map[string]child_resource{}
-	for i := 0; i < t.NumField(); i++ {
-		cr := child_resource{}
-		f := t.Field(i)
-		ft := f.Type
-		if ft.Kind() == reflect.Ptr {
-			ft = ft.Elem()
-		}
-		if ft.Kind() == reflect.Map || ft.Kind() == reflect.Slice {
-			ft = ft.Elem()
-		}
-		cr.Type = ft
-		if hasNamedGetMethod(cr.Type) {
-			if expansion, err := getFieldExpansion(f); err != nil {
-				return nil, err
-			} else {
-				cr.expansion = *expansion
-				// TODO: Use field name instead of type for map id
-				// TODO: Also do this with paths
-				child_resources[strings.ToLower(cr.Type.Name())] = cr
-			}
-		}
-	}
-	return child_resources, nil
-}
-
-func getFieldExpansion(f reflect.StructField) (*expansion, error) {
-	isMap, isSlice := false, false
-	if f.Type.Kind() == reflect.Map {
-		isMap = true
-	} else if f.Type.Kind() == reflect.Slice {
-		isSlice = true
-	}
-	if tag := f.Tag.Get("halgo"); tag == "" {
-		return &expansion{href, nil, isMap, isSlice}, nil
-	} else if !strings.HasPrefix(tag, "expand-") {
-		return nil, Error("Malformed halgo tag: ", tag, " (tags must begin with 'expand-')")
-	} else {
-		tag = strings.TrimPrefix(tag, "expand-")
-		if tag == "none" {
-			return &expansion{none, nil, isMap, isSlice}, nil
-		} else if tag == "href" {
-			return &expansion{href, nil, isMap, isSlice}, nil
-		} else if tag == "full" {
-			return &expansion{full, nil, isMap, isSlice}, nil
-		} else if strings.HasPrefix(tag, "fields(") && strings.HasSuffix(tag, ")") {
-			tag = strings.TrimSuffix(strings.TrimPrefix(tag, "fields("), ")")
-			the_fields := strings.Split(tag, ",")
-			for i, g := range the_fields {
-				the_fields[i] = strings.Trim(g, " \t")
-			}
-			return &expansion{fields, the_fields, isMap, isSlice}, nil
-		} else {
-			return nil, Error("Malformed halgo tag: ", tag, " (expansion must be: 'none', 'href', 'full', or 'fields(comma, separated, fields)'' )")
-		}
-	}
+func methodError(t reflect.Type, methodName string, args ...interface{}) error {
+	prependage := t.Name() + "." + methodName
+	args = append([]interface{}{prependage}, args...)
+	return routeError(args...)
 }
 
 func hasNamedGetMethod(t reflect.Type) bool {
@@ -206,28 +19,13 @@ func hasNamedGetMethod(t reflect.Type) bool {
 	return exists
 }
 
-func assertIsResource(t reflect.Type) error {
-	if !hasNamedGetMethod(t) {
-		return Error(t.Name(), "does not have a method named", GET)
-	}
-	_, err := analyseGetter(t)
-	return err
-}
-
 type methods map[string]*method_info
 
-func node_requires_id(n node) (bool, error) {
-	really := []bool{}
-	for _, n := range n.methods {
-		really = append(really, n.spec.uses_id)
+func (n node) SupportsMethod(m string) bool {
+	if _, yes := n.methods[m]; yes {
+		return true
 	}
-	first_answer := really[0]
-	for _, r := range really[1:] {
-		if r != first_answer {
-			return false, Error(n.name, "requires ID parameter in some methods but not all. This is illegal.")
-		}
-	}
-	return first_answer, nil
+	return false
 }
 
 func getMethods(t reflect.Type) (methods, error) {
@@ -461,14 +259,4 @@ func analyseOutputs(E error_f, ctx method_context) error {
 
 func routeError(args ...interface{}) error {
 	return Error("ROUTING: ", args)
-}
-
-func methodError(t reflect.Type, methodName string, args ...interface{}) error {
-	prependage := t.Name() + "." + methodName
-	args = append([]interface{}{prependage}, args...)
-	return routeError(args...)
-}
-
-func newPtrTo(t reflect.Type) interface{} {
-	return reflect.New(t).Interface()
 }

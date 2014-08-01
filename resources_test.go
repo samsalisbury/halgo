@@ -40,7 +40,7 @@ func (Apps) GET() (*Apps, error) {
 }
 
 type App struct {
-	Name     string                `json:"name" halgo:"id"`
+	Name     string                `json:"name"`
 	Versions map[string]AppVersion `json:"versions"`
 }
 
@@ -68,7 +68,7 @@ var the_apps = map[string]App{
 }
 
 type AppVersion struct {
-	ID      string `json:"id" halgo:"id"`
+	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }

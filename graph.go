@@ -88,10 +88,10 @@ func makeChild(f reflect.StructField) (*child, bool, error) {
 		is_tagged_as_child := f.Tag.Get("halgo") != ""
 		var err error
 		if is_tagged_as_child {
-			err = Error(f.Name, " is tagged as a halgo child, however ", t, "does not implement GET, and thus is an illegal resource.")
+			err = Error(f.Name, " is tagged as a halgo child '", f.Tag.Get("halgo"), "' however ", t, " does not implement GET, and thus is an illegal resource.")
 		}
 		return nil, false, err
-	} else if mapKeyKind != reflect.String {
+	} else if t.Kind() == reflect.Map && mapKeyKind != reflect.String {
 		// TODO: This may be too restrictive, consider opting-in to being a
 		// child resource rather than assuming all things which implement GET()
 		// are necessarily intended to be child resources.

@@ -2,9 +2,9 @@ package halgo
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 func NewServer(root interface{}) (server, error) {
@@ -22,7 +22,11 @@ type server struct {
 func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	Print("request ", r.URL)
 	if response, err := s.process_request(r); err != nil {
-		w.WriteHeader(500)
+		if httpError, ok := err.(HTTPError); ok {
+			w.WriteHeader(httpError.StatusCode)
+		} else {
+			w.WriteHeader(500)
+		}
 		w.Write([]byte(err.Error()))
 	} else {
 		write(w, response)
@@ -40,11 +44,10 @@ func write(w http.ResponseWriter, r *response) {
 }
 
 func (s server) process_request(r *http.Request) (*response, error) {
-	path := strings.Split(r.URL.Path[1:], "/")
-	if node, err := s.routes.Resolve(path...); err != nil {
+	if node, err := s.routes.Resolve(r.URL.Path); err != nil {
 		return nil, err
 	} else if node == nil {
-		return nil, Error404(r.URL.Path)
+		return nil, Error404("(Node was nil.) " + r.URL.Path)
 	} else if method, ok := node.BindMethod(r.Method); !ok {
 		return nil, Error405(r.Method, node)
 	} else if err := method.SetPayload(r.Body); err != nil {
@@ -59,7 +62,9 @@ func (s server) process_request(r *http.Request) (*response, error) {
 }
 
 func (m *bound_method) Invoke() (interface{}, error) {
+	println("Invoke() called.")
 	ids := m.node.RouteIDs()
+	println("Invoke() got ids=", fmt.Sprint(ids))
 	if entity, err := m.method(ids, m.node.url_value, m.payload); err != nil {
 		return nil, err
 	} else {
@@ -68,6 +73,7 @@ func (m *bound_method) Invoke() (interface{}, error) {
 }
 
 func (n *resolved_node) BindMethod(name string) (*bound_method, bool) {
+	println("BindMethod called on", name)
 	if m, ok := n.methods[name]; !ok {
 		return nil, false
 	} else {
@@ -76,6 +82,7 @@ func (n *resolved_node) BindMethod(name string) (*bound_method, bool) {
 }
 
 func (m *bound_method) SetPayload(body io.ReadCloser) error {
+	println("SetPayload called.")
 	if !m.spec.uses_payload {
 		return nil
 	}
@@ -91,16 +98,6 @@ type bound_method struct {
 	*method_info
 	node    *resolved_node
 	payload interface{}
-}
-
-func (n *resolved_node) RouteIDs() map[string]string {
-	ids := map[string]string{}
-	for n.parent != nil {
-		if n.parent.is_identity {
-			ids[n.parent.url_name] = n.parent.url_value
-		}
-	}
-	return ids
 }
 
 type prepared_request struct {
@@ -189,15 +186,6 @@ type response struct {
 	status int
 	entity interface{}
 	links  map[string]string
-}
-
-func (n *resolved_node) Path() string {
-	p := ""
-	for n != nil {
-		p = "/" + n.RouteID() + p
-		n = n.parent
-	}
-	return p
 }
 
 func (n *resolved_node) RouteID() string {

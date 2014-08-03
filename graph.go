@@ -43,7 +43,7 @@ func makeChildren(t reflect.Type) (map[string]*child, *child, error) {
 		} else if c.node.is_identity {
 			identity_children = append(identity_children, c)
 		} else {
-			children[f.Name] = c
+			children[makeUrlName(f.Name, false)] = c
 		}
 	}
 	if len(identity_children) > 1 {

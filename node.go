@@ -81,7 +81,7 @@ func (n *resolved_node) Child(id string) (*child, bool) {
 
 type child struct {
 	node      *node
-	expansion expansion
+	expansion *expansion
 	kind      reflect.Kind
 }
 

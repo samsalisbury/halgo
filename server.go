@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 )
 
 func NewServer(root interface{}) (server, error) {
@@ -162,9 +163,9 @@ func append_embedded_resources(n *resolved_node, resource *map[string]interface{
 		name := c.node.url_name
 		var err error = nil
 		var entity interface{} = nil
-		if e.isMap {
+		if e.Field.Kind == reflect.Map {
 			entity, err = create_child_map(name, n)
-		} else if e.isSlice {
+		} else if e.Field.Kind == reflect.Slice {
 			entity, err = create_child_slice(name, n)
 		} else {
 			entity, err = create_named_child(e.expansion_type, name, n)
@@ -184,7 +185,7 @@ func create_named_child(et expansion_type, name string, n *resolved_node) (inter
 	} else {
 		method, _ := r.BindMethod("GET")
 		switch et {
-		case full:
+		case all:
 			return method.InvokeAndLink()
 		case href:
 			return method.SelfLinkOnly()

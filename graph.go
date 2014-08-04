@@ -112,7 +112,7 @@ func makeChild(f reflect.StructField) (*child, bool, error) {
 	} else if node, err := makeGraph(fi.UnderlyingType, &f); err != nil {
 		return nil, false, err
 	} else {
-		return &child{node, *expansion, fi.Kind}, true, nil
+		return &child{node, expansion, fi.Kind}, true, nil
 	}
 }
 

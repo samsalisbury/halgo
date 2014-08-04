@@ -26,12 +26,13 @@ func (n *resolved_node) Path() string {
 		p = append([]string{n.RouteID()}, p...)
 		n = n.parent
 	}
-	// Remember the root node with have RouteID = ''
+	// Remember the root node will have RouteID = ''
 	return strings.Join(p, "/")
 }
 
 func (n *resolved_node) RouteIDs() map[string]string {
 	ids := map[string]string{}
+
 	for n.parent != nil {
 		if n.parent.is_identity {
 			ids[n.parent.url_name] = n.parent.url_value
@@ -49,13 +50,12 @@ func (n *node) Resolve(uriPath string) (*resolved_node, error) {
 }
 
 func (n *resolved_node) Resolve(path ...string) (*resolved_node, error) {
-	println("path =", strings.Join(path, "/"))
 	if len(path) == 0 || (len(path) == 1 && len(path[0]) == 0) {
 		// it's the last point in the path, or the path ended with /, which we ignore
 		// TODO: Redirect paths ending / to paths without?
 		return n, nil
 	} else if c, ok := n.Child(path[0]); ok {
-		node := &resolved_node{&c.node, n, path[0]}
+		node := &resolved_node{c.node, n, path[0]}
 		return node.Resolve(path[1:]...)
 	}
 	return nil, Error404(n.Path() + "/" + path[0])
@@ -72,19 +72,10 @@ func (n *resolved_node) Child(id string) (*child, bool) {
 }
 
 type child struct {
-	node       node
-	expansion  expansion
-	child_type child_type
+	node      *node
+	expansion expansion
+	kind      reflect.Kind
 }
-
-type child_type string
-
-const (
-	not_child     = child_type("none")
-	child_pointer = child_type("pointer")
-	child_map     = child_type("map")
-	child_slice   = child_type("slice")
-)
 
 func (n node) canHandle(method string) bool {
 	switch method {

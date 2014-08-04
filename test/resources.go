@@ -8,7 +8,6 @@ type RootResource struct {
 }
 
 func (RootResource) GET() (*RootResource, error) {
-	println("Root handler")
 	return &RootResource{
 		Welcome: "Welcome to the deployment service API",
 		Version: "0.0.110",

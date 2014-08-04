@@ -8,8 +8,6 @@ type RootResource struct {
 }
 
 func (RootResource) GET() (*RootResource, error) {
-	println("Root handler")
-
 	return &RootResource{
 		Welcome: "Welcome to the deployment service API",
 		Version: "0.0.110",
@@ -45,7 +43,6 @@ type App struct {
 }
 
 func (App) GET(name string) (*App, error) {
-	println("App.GET(", name, ")")
 	if app, ok := the_apps[name]; !ok {
 		return nil, Error404(name)
 	} else {
@@ -74,10 +71,6 @@ type AppVersion struct {
 }
 
 func (AppVersion) GET(parentIDs map[string]string, version string) (*AppVersion, error) {
-	println("PARENT IDS:")
-	for k, v := range parentIDs {
-		println("\t", k, "=", v)
-	}
 	name := parentIDs["app"]
 	if app, ok := the_apps[name]; !ok {
 		return nil, Error404(name)

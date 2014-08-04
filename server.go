@@ -2,7 +2,6 @@ package halgo
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 )
@@ -16,7 +15,7 @@ func NewServer(root interface{}) (server, error) {
 }
 
 type server struct {
-	routes node
+	routes *node
 }
 
 func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -62,9 +61,7 @@ func (s server) process_request(r *http.Request) (*response, error) {
 }
 
 func (m *bound_method) Invoke() (interface{}, error) {
-	println("Invoke() called.")
 	ids := m.node.RouteIDs()
-	println("Invoke() got ids=", fmt.Sprint(ids))
 	if entity, err := m.method(ids, m.node.url_value, m.payload); err != nil {
 		return nil, err
 	} else {
@@ -73,7 +70,6 @@ func (m *bound_method) Invoke() (interface{}, error) {
 }
 
 func (n *resolved_node) BindMethod(name string) (*bound_method, bool) {
-	println("BindMethod called on", name)
 	if m, ok := n.methods[name]; !ok {
 		return nil, false
 	} else {
@@ -82,7 +78,6 @@ func (n *resolved_node) BindMethod(name string) (*bound_method, bool) {
 }
 
 func (m *bound_method) SetPayload(body io.ReadCloser) error {
-	println("SetPayload called.")
 	if !m.spec.uses_payload {
 		return nil
 	}
@@ -166,7 +161,6 @@ func get_sub_resource(n *resolved_node, name string) (interface{}, error) {
 	if node, err := n.Resolve(name); err != nil {
 		return nil, err
 	} else {
-		println("sub_node: ", node.url_name, ":", node.url_value)
 		return node.methods[GET].method(n.RouteIDs(), n.RouteID(), nil)
 	}
 }

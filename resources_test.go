@@ -1,10 +1,10 @@
 package halgo
 
 type RootResource struct {
-	Welcome string  `json:"welcome"`
-	Version string  `json:"version"`
-	Apps    *Apps   `json:"apps" halgo:"expand-full"`
-	health  *Health `json:"-"`
+	Welcome string `json:"welcome"`
+	Version string `json:"version"`
+	Apps    *Apps  `json:"apps" halgo:"expand-full"`
+	health  *Health
 }
 
 func (RootResource) GET() (*RootResource, error) {

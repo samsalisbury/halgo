@@ -27,7 +27,7 @@ func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(500)
 		}
 		w.Write([]byte(err.Error()))
-	} else if response == nil {
+	} else if response.entity == nil {
 		w.WriteHeader(204)
 	} else {
 		write(w, response)
@@ -53,18 +53,37 @@ func (s server) process_request(r *http.Request) (*response, error) {
 		return nil, Error405(r.Method, node)
 	} else if err := method.SetPayload(r.Body); err != nil {
 		return nil, err
-	} else if entity, err := method.Invoke(); err != nil {
+	} else if resource, err := method.InvokeAndLink(); err != nil {
+		return nil, err
+	} else {
+		return &response{200, resource}, nil
+	}
+}
+
+func (m *bound_method) SelfLinkOnly() (map[string]interface{}, error) {
+	resource := map[string]interface{}{}
+	if err := addSelfLink(&resource, m.node); err != nil {
+		return nil, err
+	} else {
+		return resource, nil
+	}
+}
+
+func (m *bound_method) InvokeAndLink() (*map[string]interface{}, error) {
+	if entity, err := m.Invoke(); err != nil {
 		return nil, err
 	} else if entity == nil {
 		return nil, nil // This will cause a 204 No Content in the layer above
-	} else if links, err := makeLinks(node); err != nil {
+	} else if resource, err := toMap(entity); err != nil {
 		return nil, err
-	} else if resource, err := appendLinks(entity, links); err != nil {
+	} else if err := addSelfLink(resource, m.node); err != nil {
 		return nil, err
-	} else if response, err := prepare_response(node, resource); err != nil {
+	} else if err := appendLinks(resource, m.node); err != nil {
+		return nil, err
+	} else if err := append_embedded_resources(m.node, resource); err != nil {
 		return nil, err
 	} else {
-		return response, nil
+		return resource, nil
 	}
 }
 
@@ -79,21 +98,19 @@ func (m *bound_method) Invoke() (interface{}, error) {
 	}
 }
 
-func makeLinks(n *resolved_node) (*map[string]interface{}, error) {
-	return &map[string]interface{}{
-		"self": map[string]string{"href": n.Path()},
-	}, nil
+func appendLinks(links *map[string]interface{}, n *resolved_node) error {
+	// TODO: Generate and append more links for n
+	return nil
 }
 
-func appendLinks(entity interface{}, links *map[string]interface{}) (*map[string]interface{}, error) {
-	if resource, err := toMap(entity); err != nil {
-		return nil, err
-	} else if _, hasLinks := (*resource)["_links"]; hasLinks {
-		return nil, Error("Resource already has field '_links'")
-	} else {
-		(*resource)["_links"] = links
-		return resource, nil
+func addSelfLink(resource *map[string]interface{}, n *resolved_node) error {
+	href := n.Path()
+	if href == "" {
+		// This is a hack to make the root href non-empty. Questionable whether we should bother with this.
+		href = "/"
 	}
+	(*resource)["self"] = map[string]string{"href": href}
+	return nil
 }
 
 func (n *resolved_node) BindMethod(name string) (*bound_method, bool) {
@@ -129,17 +146,17 @@ type prepared_request struct {
 	payload   interface{}
 }
 
-func prepare_response(n *resolved_node, resource *map[string]interface{}) (*response, error) {
-	if resource == nil {
-		return nil, Error("Resource was nil. Ought to have returned 204 No Content by now.")
-	} else {
-		append_embedded_resources(n, resource)
-		// TODO: Allow other responses, e.g. 201 Created/ 202 Accepted etc.
-		return &response{200, &resource, nil}, nil
-	}
-}
+// func prepare_response(n *resolved_node, resource *map[string]interface{}) (*response, error) {
+// 	if resource == nil {
+// 		return nil, Error("Resource was nil. Ought to have returned 204 No Content by now.")
+// 	} else {
+// 		append_embedded_resources(n, resource)
+// 		// TODO: Allow other responses, e.g. 201 Created/ 202 Accepted etc.
+// 		return &response{200, &resource, nil}, nil
+// 	}
+// }
 
-func append_embedded_resources(n *resolved_node, resource *map[string]interface{}) {
+func append_embedded_resources(n *resolved_node, resource *map[string]interface{}) error {
 	for _, c := range n.children {
 		e := c.expansion
 		name := c.node.url_name
@@ -158,20 +175,24 @@ func append_embedded_resources(n *resolved_node, resource *map[string]interface{
 			(*resource)[name] = entity
 		}
 	}
+	return nil
 }
 
 func create_named_child(et expansion_type, name string, n *resolved_node) (interface{}, error) {
-	if et == href {
-		return map[string]string{"_self": n.Path() + "/" + name}, nil
-	} else if et == full {
-		if r, err := n.Resolve(name); err != nil {
-			return nil, err
-		} else {
-			method, _ := r.BindMethod("GET")
-			return method.Invoke()
-		}
+	if r, err := n.Resolve(name); err != nil {
+		return nil, err
 	} else {
-		return nil, Error("fields(...) filter not yet implemented.")
+		method, _ := r.BindMethod("GET")
+		switch et {
+		case full:
+			return method.InvokeAndLink()
+		case href:
+			return method.SelfLinkOnly()
+		case fields:
+			return nil, Error("fields(...) filter not yet implemented.")
+		default:
+			return nil, Error("Filter ", et, " does not exist.")
+		}
 	}
 }
 
@@ -181,14 +202,6 @@ func create_child_map(name string, n *resolved_node) (map[string]interface{}, er
 
 func create_child_slice(name string, n *resolved_node) ([]interface{}, error) {
 	return nil, Error("Child slices not yet implemented.")
-}
-
-func get_sub_resource(n *resolved_node, name string) (interface{}, error) {
-	if node, err := n.Resolve(name); err != nil {
-		return nil, err
-	} else {
-		return node.methods[GET].method(n.RouteIDs(), n.RouteID(), nil)
-	}
 }
 
 func toMap(resource interface{}) (*map[string]interface{}, error) {
@@ -205,5 +218,4 @@ func toMap(resource interface{}) (*map[string]interface{}, error) {
 type response struct {
 	status int
 	entity interface{}
-	links  map[string]string
 }

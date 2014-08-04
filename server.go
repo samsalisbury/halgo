@@ -109,7 +109,7 @@ func addSelfLink(resource *map[string]interface{}, n *resolved_node) error {
 		// This is a hack to make the root href non-empty. Questionable whether we should bother with this.
 		href = "/"
 	}
-	(*resource)["self"] = map[string]string{"href": href}
+	(*resource)["_links"] = map[string]map[string]string{"self": map[string]string{"href": href}}
 	return nil
 }
 

@@ -27,6 +27,8 @@ func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(500)
 		}
 		w.Write([]byte(err.Error()))
+	} else if response == nil {
+		w.WriteHeader(204)
 	} else {
 		write(w, response)
 	}
@@ -53,7 +55,13 @@ func (s server) process_request(r *http.Request) (*response, error) {
 		return nil, err
 	} else if entity, err := method.Invoke(); err != nil {
 		return nil, err
-	} else if response, err := prepare_response(node, entity); err != nil {
+	} else if entity == nil {
+		return nil, nil // This will cause a 204 No Content in the layer above
+	} else if links, err := makeLinks(node); err != nil {
+		return nil, err
+	} else if resource, err := appendLinks(entity, links); err != nil {
+		return nil, err
+	} else if response, err := prepare_response(node, resource); err != nil {
 		return nil, err
 	} else {
 		return response, nil
@@ -64,8 +72,27 @@ func (m *bound_method) Invoke() (interface{}, error) {
 	ids := m.node.RouteIDs()
 	if entity, err := m.method(ids, m.node.url_value, m.payload); err != nil {
 		return nil, err
+	} else if entity == nil {
+		return nil, nil
 	} else {
 		return entity, nil
+	}
+}
+
+func makeLinks(n *resolved_node) (*map[string]interface{}, error) {
+	return &map[string]interface{}{
+		"self": map[string]string{"href": n.Path()},
+	}, nil
+}
+
+func appendLinks(entity interface{}, links *map[string]interface{}) (*map[string]interface{}, error) {
+	if resource, err := toMap(entity); err != nil {
+		return nil, err
+	} else if _, hasLinks := (*resource)["_links"]; hasLinks {
+		return nil, Error("Resource already has field '_links'")
+	} else {
+		(*resource)["_links"] = links
+		return resource, nil
 	}
 }
 
@@ -102,18 +129,17 @@ type prepared_request struct {
 	payload   interface{}
 }
 
-func prepare_response(n *resolved_node, resource interface{}) (*response, error) {
+func prepare_response(n *resolved_node, resource *map[string]interface{}) (*response, error) {
 	if resource == nil {
-		return &response{404, nil, nil}, nil
-	} else if m, err := toMap(resource); err != nil {
-		return nil, err
+		return nil, Error("Resource was nil. Ought to have returned 204 No Content by now.")
 	} else {
-		append_embedded_resources(n, &m)
-		return &response{200, &m, nil}, nil
+		append_embedded_resources(n, resource)
+		// TODO: Allow other responses, e.g. 201 Created/ 202 Accepted etc.
+		return &response{200, &resource, nil}, nil
 	}
 }
 
-func append_embedded_resources(n *resolved_node, m *map[string]interface{}) {
+func append_embedded_resources(n *resolved_node, resource *map[string]interface{}) {
 	for _, c := range n.children {
 		e := c.expansion
 		name := c.node.url_name
@@ -127,9 +153,9 @@ func append_embedded_resources(n *resolved_node, m *map[string]interface{}) {
 			entity, err = create_named_child(e.expansion_type, name, n)
 		}
 		if err != nil {
-			(*m)[name] = map[string]string{"error": err.Error()}
+			(*resource)[name] = map[string]string{"error": err.Error()}
 		} else {
-			(*m)[name] = entity
+			(*resource)[name] = entity
 		}
 	}
 }
@@ -165,14 +191,14 @@ func get_sub_resource(n *resolved_node, name string) (interface{}, error) {
 	}
 }
 
-func toMap(resource interface{}) (map[string]interface{}, error) {
+func toMap(resource interface{}) (*map[string]interface{}, error) {
 	var v map[string]interface{}
 	if buf, err := json.Marshal(resource); err != nil {
-		return v, err
+		return nil, err
 	} else if err := json.Unmarshal(buf, &v); err != nil {
-		return v, err
+		return nil, err
 	} else {
-		return v, nil
+		return &v, nil
 	}
 }
 
@@ -180,12 +206,4 @@ type response struct {
 	status int
 	entity interface{}
 	links  map[string]string
-}
-
-func (n *resolved_node) RouteID() string {
-	if n.url_value != "" {
-		return n.url_value
-	} else {
-		return n.url_name
-	}
 }

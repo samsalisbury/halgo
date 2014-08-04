@@ -30,6 +30,14 @@ func (n *resolved_node) Path() string {
 	return strings.Join(p, "/")
 }
 
+func (n *resolved_node) RouteID() string {
+	if n.url_value != "" {
+		return n.url_value
+	} else {
+		return n.url_name
+	}
+}
+
 func (n *resolved_node) RouteIDs() map[string]string {
 	ids := map[string]string{}
 

@@ -5,6 +5,16 @@ import (
 	"strings"
 )
 
+type meta struct {
+	expansion      *expansion
+	child_link_rel *string
+}
+
+type link struct {
+	rel  string
+	href string
+}
+
 type expansion_type string
 
 const (
@@ -31,12 +41,14 @@ type child_resource struct {
 //      `halgo:"embed(all) link(rel=apps)`
 const whitespace_chars = " \t"
 
-func parseTags(f reflect.StructField) (map[string]map[string]string, error) {
+type tags map[string]map[string]string
+
+func parseTags(f reflect.StructField) (tags, error) {
 	data := f.Tag.Get("halgo")
 	if data == "" {
 		return nil, nil
 	}
-	commands := map[string]map[string]string{}
+	tags := tags{}
 	for _, c := range strings.Split(data, " ") {
 		c = strings.Trim(c, whitespace_chars)
 		if len(c) == 0 {
@@ -49,10 +61,10 @@ func parseTags(f reflect.StructField) (map[string]map[string]string, error) {
 		if params, err := parseTagParams(parts[1]); err != nil {
 			return nil, err
 		} else {
-			commands[parts[0]] = params
+			tags[parts[0]] = params
 		}
 	}
-	return commands, nil
+	return tags, nil
 }
 
 func parseTagParams(p string) (map[string]string, error) {
@@ -70,13 +82,32 @@ func parseTagParams(p string) (map[string]string, error) {
 	return params, nil
 }
 
-func getFieldExpansion(f reflect.StructField) (*expansion, error) {
+func getMetadata(f reflect.StructField) (m meta, err error) {
 	if tags, err := parseTags(f); err != nil {
-		return nil, err
-	} else if embed, ok := tags["embed"]; !ok {
+		return m, err
+	} else if expansion, err := getFieldExpansion(tags, fieldInfo(f)); err != nil {
+		return m, err
+	} else if child_link_rel, err := getChildLinkRel(tags); err != nil {
+		return m, err
+	} else {
+		return meta{expansion, child_link_rel}, nil
+	}
+}
+
+func getChildLinkRel(t tags) (*string, error) {
+	if l, ok := t["link"]; !ok {
+		return nil, nil
+	} else if rel, ok := l["rel"]; !ok {
+		return nil, Error("Link must specify rel=<name>. E.g. link(rel=next).")
+	} else {
+		return &rel, nil
+	}
+}
+
+func getFieldExpansion(t tags, fi field_info) (*expansion, error) {
+	if embed, ok := t["embed"]; !ok {
 		return nil, nil
 	} else {
-		fi := fieldInfo(f)
 		if _, ok := embed[""]; ok {
 			return &expansion{all, nil, fi}, nil
 		}
@@ -93,35 +124,3 @@ func getFieldExpansion(f reflect.StructField) (*expansion, error) {
 		return nil, Error("Embed type '", embed, " is not recognised.")
 	}
 }
-
-// func getFieldExpansion(f reflect.StructField) (*expansion, error) {
-// 	isMap, isSlice := false, false
-// 	if f.Type.Kind() == reflect.Map {
-// 		isMap = true
-// 	} else if f.Type.Kind() == reflect.Slice {
-// 		isSlice = true
-// 	}
-// 	if tag := f.Tag.Get("halgo"); tag == "" {
-// 		return &expansion{none, nil, isMap, isSlice}, nil
-// 	} else if !strings.HasPrefix(tag, "embed(") && !strings.HasPrefix(tag, "link(") {
-// 		return nil, Error("Malformed halgo tag: ", tag, " (tags must begin with 'embed(')")
-// 	} else {
-// 		tag = strings.TrimPrefix(tag, "expand-")
-// 		if tag == "none" {
-// 			return &expansion{none, nil, isMap, isSlice}, nil
-// 		} else if tag == "href" {
-// 			return &expansion{href, nil, isMap, isSlice}, nil
-// 		} else if tag == "full" {
-// 			return &expansion{full, nil, isMap, isSlice}, nil
-// 		} else if strings.HasPrefix(tag, "fields(") && strings.HasSuffix(tag, ")") {
-// 			tag = strings.TrimSuffix(strings.TrimPrefix(tag, "fields("), ")")
-// 			the_fields := strings.Split(tag, ",")
-// 			for i, g := range the_fields {
-// 				the_fields[i] = strings.Trim(g, " \t")
-// 			}
-// 			return &expansion{fields, the_fields, isMap, isSlice}, nil
-// 		} else {
-// 			return nil, Error("Malformed halgo tag: ", tag, " (expansion must be: 'none', 'href', 'full', or 'fields(comma, separated, fields)'' )")
-// 		}
-// 	}
-// }

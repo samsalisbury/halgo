@@ -159,7 +159,7 @@ type prepared_request struct {
 
 func append_embedded_resources(n *resolved_node, resource *map[string]interface{}) error {
 	for _, c := range n.children {
-		e := c.expansion
+		e := c.meta.expansion
 		name := c.node.url_name
 		var err error = nil
 		var entity interface{} = nil

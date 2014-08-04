@@ -4,7 +4,7 @@ type RootResource struct {
 	Welcome string  `json:"welcome"`
 	Version string  `json:"version"`
 	Apps    *Apps   `json:"apps"    halgo:"embed()"`
-	health  *Health `               halgo:"link(health) embed(href)"`
+	health  *Health `               halgo:"link(rel=health) embed(href)"`
 }
 
 func (RootResource) GET() (*RootResource, error) {

@@ -107,12 +107,12 @@ func makeChild(f reflect.StructField) (*child, bool, error) {
 		// are necessarily intended to be child resources.
 		// Also, in future, other kinds of key may be acceptable.
 		return nil, false, Error(f.Name, " points to a resource type, but its key type is not string. Only string keys are allowed for child collections.")
-	} else if expansion, err := getFieldExpansion(f); err != nil {
+	} else if metadata, err := getMetadata(f); err != nil {
 		return nil, false, err
 	} else if node, err := makeGraph(fi.UnderlyingType, &f); err != nil {
 		return nil, false, err
 	} else {
-		return &child{node, expansion, fi.Kind}, true, nil
+		return &child{node, metadata, fi.Kind}, true, nil
 	}
 }
 

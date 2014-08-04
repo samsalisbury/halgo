@@ -80,9 +80,9 @@ func (n *resolved_node) Child(id string) (*child, bool) {
 }
 
 type child struct {
-	node      *node
-	expansion *expansion
-	kind      reflect.Kind
+	node *node
+	meta meta
+	kind reflect.Kind
 }
 
 func (n node) canHandle(method string) bool {

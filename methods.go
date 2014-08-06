@@ -30,12 +30,14 @@ func (n node) SupportsMethod(m string) bool {
 
 func getMethods(t reflect.Type) (methods, error) {
 	m := map[string]*method_info{}
-	if getter, err := analyseGetter(t); err != nil {
-		return nil, err
-	} else if getter != nil {
-		m["GET"] = getter
+	for _, method_name := range []string{HEAD, GET, DELETE, PUT, PATCH, POST} {
+		if method, err := analyseHttpMethod(t, method_name); err != nil {
+			return nil, err
+		} else if method != nil {
+			m[method_name] = method
+		}
 	}
-	// TODO: Add other methods
+
 	return m, nil
 }
 
@@ -61,6 +63,19 @@ type method_context struct {
 }
 
 type error_f func(args ...interface{}) error
+
+func analyseHttpMethod(t reflect.Type, method string) (*method_info, error) {
+	E := func(args ...interface{}) error { return methodError(t, method, args...) }
+	if ctx, ok := analyseMethodContext(t, method); !ok {
+		return nil, nil // nil just means there is no method with this name
+	} else if err := analyseOutputs(E, ctx); err != nil {
+		return nil, err
+	} else if method_spec, err := analyseInputs(E, ctx, parameter_specs[method]); err != nil {
+		return nil, err
+	} else {
+		return createMethod(method_spec, ctx)
+	}
+}
 
 func analyseGetter(t reflect.Type) (m *method_info, err error) {
 	E := func(args ...interface{}) error { return methodError(t, GET, args...) }

@@ -26,8 +26,8 @@ func (Health) GET() (*Health, error) {
 }
 
 type Apps struct {
-	NumberOfApps int            `json:"numberOfApps"`
-	Apps         map[string]App `json:"apps"         halgo:"embed()"`
+	NumberOfApps int      `json:"numberOfApps"`
+	Apps         AppsList `json:"apps"         halgo:"collection()"`
 }
 
 func (Apps) GET() (*Apps, error) {
@@ -53,7 +53,14 @@ func (App) GET(name string) (*App, error) {
 	}
 }
 
-var the_apps = map[string]App{
+type AppsList map[string]App
+
+func (l *AppsList) Manifest() error {
+	(*l) = the_apps
+	return nil
+}
+
+var the_apps = AppsList{
 	"test-app": App{
 		Name: "test-app",
 		Versions: map[string]AppVersion{
@@ -79,4 +86,15 @@ func (AppVersion) GET(parentIDs map[string]string, version string) (*AppVersion,
 	} else {
 		return &ver, nil
 	}
+}
+
+func (AppVersion) PUT(parentIDs map[string]string, version string, payload *AppVersion) (*AppVersion, error) {
+	name := parentIDs["app"]
+	if _, ok := the_apps[name]; !ok {
+		the_apps[name] = App{Name: name}
+	}
+	if _, ok := the_apps[name].Versions[version]; ok {
+		return nil, Error409(name + " v" + version + " already exists.")
+	}
+	return payload, nil
 }

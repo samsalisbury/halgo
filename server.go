@@ -27,7 +27,7 @@ func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.WriteHeader(500)
 		}
-		w.Write([]byte(err.Error()))
+		w.Write(json_error(err))
 	} else if response.entity == nil {
 		w.WriteHeader(204)
 	} else {
@@ -38,7 +38,7 @@ func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func write(w http.ResponseWriter, r *response) {
 	if buf, err := json.MarshalIndent(r.entity, "", "\t"); err != nil {
 		w.WriteHeader(500)
-		w.Write([]byte(err.Error()))
+		w.Write(json_error(err))
 	} else {
 		w.WriteHeader(r.status)
 		w.Write(buf)
@@ -126,9 +126,11 @@ func (m *bound_method) SetPayload(body io.ReadCloser) error {
 	if !m.spec.uses_payload {
 		return nil
 	}
-	if payload, err := prepare_payload(body, m.ctx.owner_pointer_type); err != nil {
+	if payload, err := prepare_payload(body, m.ctx.owner_type); err != nil {
+		println("Payload failed: ", payload, "; err: ", err.Error())
 		return err
 	} else {
+		println("Got payload: ", payload)
 		m.payload = payload
 		return nil
 	}
@@ -146,16 +148,6 @@ type prepared_request struct {
 	id        string
 	payload   interface{}
 }
-
-// func prepare_response(n *resolved_node, resource *map[string]interface{}) (*response, error) {
-// 	if resource == nil {
-// 		return nil, Error("Resource was nil. Ought to have returned 204 No Content by now.")
-// 	} else {
-// 		append_embedded_resources(n, resource)
-// 		// TODO: Allow other responses, e.g. 201 Created/ 202 Accepted etc.
-// 		return &response{200, &resource, nil}, nil
-// 	}
-// }
 
 func append_embedded_resources(n *resolved_node, resource *map[string]interface{}) error {
 	for _, c := range n.children {

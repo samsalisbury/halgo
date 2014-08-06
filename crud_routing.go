@@ -15,7 +15,9 @@ var error_T = reflect.TypeOf((*error)(nil)).Elem()
 
 func (n *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.Split(r.URL.Path[1:], "/")
+	println("Crawling", r.URL.Path, "length:", len(path))
 	if endpoint, parent, id, err := n.crawl(path, "", nil); err != nil {
+		println("Crawl /"+strings.Join(path, "/"), "failed:", err.Error())
 		w.WriteHeader(500)
 	} else {
 		var response *http.Response
@@ -84,7 +86,7 @@ func InternalServerError(message string) *http.Response {
 }
 
 func (n *Node) crawl(path []string, id string, parent interface{}) (endpoint *Node, endpointParent interface{}, endpointID string, err error) {
-	if len(path) == 0 {
+	if len(path) == 0 || (len(path) == 1 && len(path[0]) == 0) {
 		return n, parent, id, nil
 	}
 	var child *Child
@@ -396,7 +398,7 @@ func (n *Node) CompileManifestMethod(method reflect.Method) (Manifest_C, error) 
 }
 
 // All methods have the same input requirements. They all take either
-// something implementing Ctx, or that plus a string (i.e. ID)
+// their parent, or that plus a string (i.e. ID)
 func (n *Node) ValidateInputs(methodName string, method reflect.Method) error {
 	//println(n.EntityType.Name()+"."+methodName+" has ", method.Type.NumIn(), " params")
 	// Ignore the receiver for now.

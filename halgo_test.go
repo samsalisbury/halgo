@@ -11,7 +11,7 @@ func Test_Example(t *testing.T) {
 		Print(err)
 	} else {
 		Print("Listening on :8080")
-		go http.ListenAndServe(":8080", graph)
+		http.ListenAndServe(":8080", graph)
 		if spec, err := httpspec.NewSpec("halgo.httpspec"); err != nil {
 			t.Error(err)
 		} else {

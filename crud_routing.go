@@ -20,7 +20,7 @@ func (n *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		println("Crawl /"+strings.Join(path, "/"), "failed:", err.Error())
 		w.WriteHeader(500)
 	} else {
-		var response *http.Response
+		var response *RESP
 		switch r.Method {
 		case HEAD:
 			response = processHeadResponse(endpoint.GET(nil, parent, id))
@@ -38,34 +38,39 @@ func (n *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// TODO: Prepare a 405 response
 			response = nil
 		}
-		response.Write(w)
+		w.WriteHeader(response.StatusCode)
+		w.Write(response.Body)
 	}
 }
 
-func processPutResponse(statusCode int, entity interface{}, err error) *http.Response {
+func processPutResponse(statusCode int, entity interface{}, err error) *RESP {
 	// TODO
 	return nil
 }
 
-func processHeadResponse(statusCode int, entity interface{}, err error) *http.Response {
+func processHeadResponse(statusCode int, entity interface{}, err error) *RESP {
 	if data, err := json.MarshalIndent(entity, "", "\t"); err != nil {
 		return InternalServerError("Unable to JSON serialise outgoing entity: " + err.Error())
 	} else {
-		r := &http.Response{
+		return &RESP{
 			StatusCode: statusCode,
+			Body:       data,
 		}
-		r.ContentLength = int64(len(data))
-		return r
 	}
 }
 
-func processGetResponse(statusCode int, entity interface{}, err error) *http.Response {
+type RESP struct {
+	StatusCode int
+	Body       []byte
+}
+
+func processGetResponse(statusCode int, entity interface{}, err error) *RESP {
 	if data, err := json.MarshalIndent(entity, "", "\t"); err != nil {
 		return InternalServerError("Unable to JSON serialise outgoing entity: " + err.Error())
 	} else {
-		return &http.Response{
+		return &RESP{
 			StatusCode: statusCode,
-			Body:       bytesBody(data),
+			Body:       data,
 		}
 	}
 }
@@ -78,10 +83,10 @@ func stringBody(body string) io.ReadCloser {
 	return ioutil.NopCloser(bytes.NewBufferString(body))
 }
 
-func InternalServerError(message string) *http.Response {
-	r := &http.Response{}
+func InternalServerError(message string) *RESP {
+	r := &RESP{}
 	r.StatusCode = 500
-	r.Body = stringBody(message)
+	r.Body = []byte(message)
 	return r
 }
 

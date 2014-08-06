@@ -20,27 +20,64 @@ func (n *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		println("Crawl /"+strings.Join(path, "/"), "failed:", err.Error())
 		w.WriteHeader(500)
 	} else {
-		var response *RESP
+		var statusCode int
+		var entity interface{}
+		//var err error
 		switch r.Method {
 		case HEAD:
-			response = processHeadResponse(endpoint.GET(nil, parent, id))
+			statusCode, entity, _ = endpoint.GET(nil, parent, id)
 		case GET:
-			response = processGetResponse(endpoint.GET(nil, parent, id))
+			statusCode, entity, _ = endpoint.GET(nil, parent, id)
 		case PUT:
 			if !endpoint.SupportsPUT() {
-				// TODO: Prepare a 405 response
-				response = nil
+				statusCode, entity = n.MethodNotSupported()
 			}
 			// TODO: Parse the payload
 			payload := (interface{})(nil)
-			response = processPutResponse(endpoint.PUT(payload, parent, id))
+			statusCode, entity, err = endpoint.PUT(payload, parent, id)
 		default:
 			// TODO: Prepare a 405 response
-			response = nil
+			entity = nil
 		}
-		w.WriteHeader(response.StatusCode)
-		w.Write(response.Body)
+
+		w.WriteHeader(statusCode)
+		if body, err := json.MarshalIndent(entity, "", "\t"); err != nil {
+			panic("Unable to serialise entity: " + err.Error())
+		} else {
+			w.Write(body)
+		}
 	}
+}
+
+type list []string
+
+func (l *list) Add(s string) {
+	(*l) = append(*l, s)
+}
+
+func (l *list) String() string {
+	return strings.Join(*l, ", ")
+}
+
+func (n *Node) MethodNotSupported() (int, error) {
+	supported := &list{}
+	if n.SupportsGET() {
+		supported.Add("HEAD")
+		supported.Add("GET")
+	}
+	if n.SupportsPUT() {
+		supported.Add("PUT")
+	}
+	if n.SupportsPATCH() {
+		supported.Add("PATCH")
+	}
+	if n.SupportsDELETE() {
+		supported.Add("DELETE")
+	}
+	if n.SupportsPOST() {
+		supported.Add("POST")
+	}
+	return 405, Error("Supported Methods: ", supported)
 }
 
 func processPutResponse(statusCode int, entity interface{}, err error) *RESP {
@@ -91,22 +128,28 @@ func InternalServerError(message string) *RESP {
 }
 
 func (n *Node) crawl(path []string, id string, parent interface{}) (endpoint *Node, endpointParent interface{}, endpointID string, err error) {
+
 	if len(path) == 0 || (len(path) == 1 && len(path[0]) == 0) {
 		return n, parent, id, nil
 	}
 	var child *Child
 	if n.ID_Child != nil {
+		println("GOT ID CHILD: ", n.ID_Child.Node.EntityType.Name())
 		child = n.ID_Child
 	} else if c, ok := (*n.Children)[path[0]]; !ok {
-		return n, parent, path[0], Error404(path[0])
+		return n, nil, "", Error404(path[0])
 	} else {
 		child = c
 	}
 
-	if entity, err := child.Node.Methods.Manifest(parent, id); err != nil {
-		return nil, nil, id, err
+	if this_entity, err := n.Methods.Manifest(parent, id); err != nil {
+		return nil, nil, "", err
+	} else if this_entity == nil {
+		return nil, nil, "", nil
+	} else if _, err := child.Node.Methods.Manifest(this_entity, id); err != nil {
+		return nil, nil, "", err
 	} else {
-		return child.Node.crawl(path[1:], path[0], entity)
+		return child.Node.crawl(path[1:], path[0], this_entity)
 	}
 }
 
@@ -118,6 +161,12 @@ func graph(t reflect.Type, parent reflect.Type) (HttpNode, error) {
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
+	if t.Kind() == reflect.Map {
+		t = t.Elem()
+	} else if t.Kind() == reflect.Slice {
+		t = t.Elem()
+	}
+
 	n := &Node{EntityType: t, EntityPtrType: reflect.PtrTo(t), ParentType: parent}
 	if err := n.CompileMethods(); err != nil {
 		return nil, err
@@ -136,7 +185,7 @@ func (n *Node) AddChildren() error {
 		if meta, err := getMetadata(f); err != nil {
 			return err
 		} else if meta.expansion != nil {
-			if childNode, err := graph(f.Type, n.EntityType); err != nil {
+			if childNode, err := graph(f.Type, n.EntityPtrType); err != nil {
 				return err
 			} else {
 				c := &Child{childNode.Node(), meta, f.Type.Kind()}
@@ -202,7 +251,7 @@ func (n *Node) SupportsGET() bool {
 	return n.Methods.Manifest != nil
 }
 
-func (n *Node) GET(null interface{}, parent interface{}, id string) (int, interface{}, error) {
+func (n *Node) GET(_ interface{}, parent interface{}, id string) (int, interface{}, error) {
 	if entity, err := n.Methods.Manifest(parent, id); err != nil {
 		return 500, nil, err
 	} else if entity == nil {
@@ -265,7 +314,7 @@ func (n *Node) DeclareParentType(method string, parent reflect.Type) error {
 	if n.ParentType == nil {
 		return Error(n, " has no parent, but method ", method, " demands one.")
 	} else if n.ParentType != parent {
-		return Error(n, " has parent type ", n.ParentType, " but method ", method, " asks for parent type ", parent)
+		return Error(n.EntityType.Name(), " has parent type ", n.ParentType, " but method ", method, " asks for parent type ", parent)
 	}
 	return nil
 }

@@ -24,6 +24,13 @@ func (entity *Apps) Manifest() error {
 	return nil
 }
 
+func (entity *App) Manifest(parent *Apps, id string) error {
+	if app, ok := parent.Apps[id]; ok {
+		(*entity) = app
+	}
+	return nil
+}
+
 // Manifest should try to find and load the entity. If any parents are missing,
 // it should return a 404 on that parent. If the parents are there, but this
 // item is not, it should leave a as nil. Otherwise it should populate a with

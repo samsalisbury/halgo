@@ -27,7 +27,7 @@ func (Health) GET() (*Health, error) {
 
 type Apps struct {
 	NumberOfApps int      `json:"numberOfApps"`
-	Apps         AppsList `json:"apps"         halgo:"collection()"`
+	Apps         AppsList `json:"apps"         halgo:"embed()"`
 }
 
 func (Apps) GET() (*Apps, error) {

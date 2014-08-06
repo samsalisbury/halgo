@@ -38,9 +38,11 @@ func (Apps) GET() (*Apps, error) {
 }
 
 type App struct {
-	Name     string                `json:"name"`
-	Versions map[string]AppVersion `json:"versions"`
+	Name     string     `json:"name"`
+	Versions VersionMap `json:"versions" halgo:"embed()"`
 }
+
+type VersionMap map[string]AppVersion
 
 func (App) GET(name string) (*App, error) {
 	if app, ok := the_apps[name]; !ok {

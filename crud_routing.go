@@ -16,13 +16,7 @@ var error_T = reflect.TypeOf((*error)(nil)).Elem()
 func (root *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.Split(r.URL.Path[1:], "/")
 	if statusCode, entity, err := root.serve(path, r); err != nil {
-		switch e := err.(type) {
-		//case HTTPError:
-		//TODO implement HTTP error handling
-		default:
-			w.WriteHeader(500)
-			w.Write([]byte("INTERNAL SERVER ERROR: " + e.Error()))
-		}
+		writeError(w, err)
 	} else {
 		w.WriteHeader(statusCode)
 		if body, err := json.MarshalIndent(entity, "", "\t"); err != nil {
@@ -30,6 +24,29 @@ func (root *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.Write(body)
 		}
+	}
+}
+
+func writeError(w http.ResponseWriter, err error) {
+	switch e := err.(type) {
+	case HTTPError:
+		writeHttpError(w, e)
+	default:
+		w.WriteHeader(500)
+		w.Write(serialise(err))
+	}
+}
+
+func writeHttpError(w http.ResponseWriter, err HTTPError) {
+	w.WriteHeader(err.StatusCode)
+	w.Write(serialise(err.HalgoError))
+}
+
+func serialise(a interface{}) []byte {
+	if data, err := json.Marshal(a); err != nil {
+		panic(err)
+	} else {
+		return data
 	}
 }
 

@@ -197,17 +197,6 @@ func create_child_slice(name string, n *resolved_node) ([]interface{}, error) {
 	return nil, Error("Child slices not yet implemented.")
 }
 
-func toMap(resource interface{}) (*map[string]interface{}, error) {
-	var v map[string]interface{}
-	if buf, err := json.Marshal(resource); err != nil {
-		return nil, err
-	} else if err := json.Unmarshal(buf, &v); err != nil {
-		return nil, err
-	} else {
-		return &v, nil
-	}
-}
-
 type response struct {
 	status int
 	entity interface{}

@@ -14,8 +14,7 @@ import (
 var error_T = reflect.TypeOf((*error)(nil)).Elem()
 
 func (root *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.Split(r.URL.Path[1:], "/")
-	if statusCode, entity, err := root.serve(path, r); err != nil {
+	if statusCode, entity, err := root.serve(r); err != nil {
 		writeError(w, err)
 	} else {
 		w.WriteHeader(statusCode)
@@ -50,25 +49,102 @@ func serialise(a interface{}) []byte {
 	}
 }
 
-func (root *Node) serve(path []string, r *http.Request) (int, interface{}, error) {
-	if statusCode, entity, err := root.serveMainEntity(path, r); err != nil {
+func (root *Node) serve(r *http.Request) (int, interface{}, error) {
+	target_href := strings.Split(r.URL.String(), "?")[0]
+	if n, statusCode, entity, err := root.serveMainEntity(r); err != nil {
+		return 0, nil, err
+	} else if m, err := toMap(entity); err != nil {
+		return 0, nil, err
+	} else if children, err := n.manifestChildren(entity, target_href); err != nil {
 		return 0, nil, err
 	} else {
-		// TODO Manifest children
-		return statusCode, entity, err
+		return statusCode, resource{Entity: *m, Embedded: children, Links: nil}, err
 	}
 }
 
-func (root *Node) serveMainEntity(path []string, r *http.Request) (int, interface{}, error) {
+func toMap(resource interface{}) (*map[string]interface{}, error) {
+	var v map[string]interface{}
+	if buf, err := json.Marshal(resource); err != nil {
+		return nil, err
+	} else if err := json.Unmarshal(buf, &v); err != nil {
+		return nil, err
+	} else {
+		return &v, nil
+	}
+}
+
+type resource struct {
+	Entity   map[string]interface{}
+	Embedded map[string]interface{}
+	Links    map[string]interface{}
+}
+
+func (n *Node) manifestChildren(parent interface{}, parent_href string) (map[string]interface{}, error) {
+	parent_href = strings.TrimSuffix(parent_href, "/")
+	children := map[string]interface{}{}
+	for k, c := range *n.Children {
+		switch c.Meta.expansion.expansion_type {
+		case href:
+			children[k] = map[string]string{"href": parent_href + "/" + k}
+		case all:
+			println("Expanding " + parent_href + "/" + k)
+			child_node, _, _, _ := n.Resolve([]string{k}, "", parent)
+			_, child, err := child_node.HTTPMethods["GET"].Invoke(&child_node.Methods, &StandardHTTPMethodInputs{Parent: parent, ID: k})
+			if err != nil {
+				children[k] = err
+			} else {
+				children[k] = child
+			}
+		case fields:
+			children[k] = "fields tag not yet supported."
+		default:
+			children[k] = fmt.Sprintf("Child type %v not recognised.", c.Meta.expansion.expansion_type)
+		}
+	}
+	return children, nil
+}
+
+func (root *Node) serveMainEntity(r *http.Request) (*Node, int, interface{}, error) {
+	path := strings.Split(r.URL.Path[1:], "/")
 	if target_node, parent_entity, id, err := root.Resolve(path, "", nil); err != nil {
-		return 0, nil, err
+		return nil, 0, nil, err
 	} else if method, ok := target_node.HTTPMethods[r.Method]; !ok {
-		return 405, target_node.MethodNotSupportedBody(), nil
+		return nil, 405, target_node.MethodNotSupportedBody(), nil
 	} else if err != nil {
-		return 0, nil, err
+		return nil, 0, nil, err
 	} else {
 		in := makeStdInputs(parent_entity, id, target_node, r)
-		return method.Invoke(&target_node.Methods, in)
+		statusCode, entity, err := method.Invoke(&target_node.Methods, in)
+		return target_node, statusCode, entity, err
+	}
+}
+
+func (n *Node) Resolve(path []string, id string, parent interface{}) (endpoint *Node, endpointParent interface{}, endpointID string, err error) {
+
+	if len(path) == 0 || (len(path) == 1 && len(path[0]) == 0) {
+		// This is either the end of the path, so return what we have.
+		return n, parent, id, nil
+	}
+
+	// Try to find the next child.
+	var child *Child
+	if n.ID_Child != nil {
+		child = n.ID_Child
+	} else if c, ok := (*n.Children)[path[0]]; !ok {
+		return n, nil, "", Error404(path[0])
+	} else {
+		child = c
+	}
+
+	// Now, we manifest the current node's entity, to use as the parent for
+	// the next (child) node.
+	if entity, err := n.Methods.Manifest(parent, id); err != nil {
+		return nil, nil, "", err
+	} else if entity == nil {
+		// This node does not exist, so we can't move to the child.
+		return nil, nil, "", nil
+	} else {
+		return child.Node.Resolve(path[1:], path[0], entity)
 	}
 }
 
@@ -167,35 +243,6 @@ func InternalServerError(message string) *RESP {
 	r.StatusCode = 500
 	r.Body = []byte(message)
 	return r
-}
-
-func (n *Node) Resolve(path []string, id string, parent interface{}) (endpoint *Node, endpointParent interface{}, endpointID string, err error) {
-
-	if len(path) == 0 || (len(path) == 1 && len(path[0]) == 0) {
-		// This is either the end of the path, so return what we have.
-		return n, parent, id, nil
-	}
-
-	// Try to find the next child.
-	var child *Child
-	if n.ID_Child != nil {
-		child = n.ID_Child
-	} else if c, ok := (*n.Children)[path[0]]; !ok {
-		return n, nil, "", Error404(path[0])
-	} else {
-		child = c
-	}
-
-	// Now, we manifest the current node's entity, to use as the parent for
-	// the next (child) node.
-	if entity, err := n.Methods.Manifest(parent, id); err != nil {
-		return nil, nil, "", err
-	} else if entity == nil {
-		// This node does not exist, so we can't move to the child.
-		return nil, nil, "", nil
-	} else {
-		return child.Node.Resolve(path[1:], path[0], entity)
-	}
 }
 
 func Graph(root interface{}) (HttpNode, error) {

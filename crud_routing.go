@@ -372,12 +372,12 @@ type user_methods struct {
 
 var user_methods_T = reflect.TypeOf(user_methods{})
 
-type Exists_U func(interface{}, interface{}, string) (bool, error)
-type Manifest_U func(interface{}, interface{}, string) error
-type Validate_U func(interface{}, interface{}, string) error
-type Write_U func(interface{}, interface{}, string) error
-type Delete_U func(interface{}, interface{}, string) error
-type Process_U func(interface{}, interface{}, string, interface{}) (interface{}, error)
+type Exists_U func(interface{}, string) (bool, error)
+type Manifest_U func(interface{}, string) error
+type Validate_U func(interface{}, string) error
+type Write_U func(interface{}, string) error
+type Delete_U func(interface{}, string) error
+type Process_U func(interface{}, string, interface{}) (interface{}, error)
 
 func makeExists(s StandardMethod) Exists_C {
 	return func(parent interface{}, id string) (bool, error) {
@@ -517,7 +517,6 @@ type StandardMethod func(
 )
 
 func (n *Node) makeStandardMethod(name string, inMaker *inputMaker, outMaker *outputMaker) StandardMethod {
-	//     func(self interface{}, parent interface{}, id string, posted func(reflect.Type) (interface{}, error)) (selfOut interface{}, trueOrFalse *bool, otherEntity interface{}, err error)
 	return func(self interface{}, parent interface{}, id string, posted func(reflect.Type) (interface{}, error)) (selfOut interface{}, trueOrFalse *bool, otherEntity interface{}, err error) {
 		if in, err := inMaker.makeInputs(self, parent, id, posted); err != nil {
 			return nil, nil, nil, err
@@ -525,8 +524,6 @@ func (n *Node) makeStandardMethod(name string, inMaker *inputMaker, outMaker *ou
 			if self == nil {
 				self = reflect.New(n.EntityType).Interface()
 			}
-			println("Getting method " + n.EntityType.Name() + "." + name)
-			println("--- in == " + fmt.Sprint(in))
 			method := reflect.ValueOf(self).MethodByName(name)
 			out := method.Call(in)
 			return outMaker.makeOutputs(self, out)
@@ -566,9 +563,7 @@ func (n *Node) analyseInputs(methodName string, compiledMethod_T reflect.Type, u
 	// actualIn is the order and type of the actual inputs
 	actualIn, actualNumIn := readMethodInputs(userMethod_T)
 
-	// TODO: Clean this up (I just patched it by skipping the first inputs)
-	//inSpec = inSpec[1:]
-	//specMaxIn = len(inSpec)
+	// Skip the first input, it's the receiver (the entity itself)
 	actualIn = actualIn[1:]
 	actualNumIn = len(actualIn)
 
@@ -608,9 +603,7 @@ type outputMaker struct {
 }
 
 func (om *outputMaker) makeOutputs(receiver interface{}, outVals []reflect.Value) (self interface{}, trueOrFalse *bool, otherEntity interface{}, err error) {
-	//if om.EntityRequired {
 	self = receiver
-	//}
 	i := 0
 	if om.TrueOrFalseRequired {
 		b := outVals[i].Bool()
@@ -635,10 +628,6 @@ func (n *Node) analyseOutputs(name string, expectedMethod_T reflect.Type, userMe
 	// outSpec is the order and type of *required* outputs, plus one
 	// extra at the start for the entity itself.
 	expectedOutSpec, expectedNumOut := readMethodOutputs(expectedMethod_T)
-
-	// // Skip the first output as that will be read as the method receiver (i.e. the entity)
-	// expectedOutSpec := outSpec[1:]
-	// expectedNumOut := len(expectedOutSpec)
 
 	// actualOut is the order and type of the actual outputs
 	actualOut, actualNumOut := readMethodOutputs(userMethod_T)

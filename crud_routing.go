@@ -13,28 +13,25 @@ import (
 
 var error_T = reflect.TypeOf((*error)(nil)).Elem()
 
-func (n *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (root *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.Split(r.URL.Path[1:], "/")
-	println("Crawling", r.URL.Path, "length:", len(path))
-	if endpoint, parent, id, err := n.crawl(path, "", nil); err != nil {
-		println("Crawl /"+strings.Join(path, "/"), "failed:", err.Error())
+	if target_node, parent_entity, id, err := root.Resolve(path, "", nil); err != nil {
 		w.WriteHeader(500)
 	} else {
 		var statusCode int
 		var entity interface{}
-		//var err error
 		switch r.Method {
 		case HEAD:
-			statusCode, entity, _ = endpoint.GET(nil, parent, id)
+			statusCode, entity, _ = target_node.GET(parent_entity, id)
 		case GET:
-			statusCode, entity, _ = endpoint.GET(nil, parent, id)
+			statusCode, entity, _ = target_node.GET(parent_entity, id)
 		case PUT:
-			if !endpoint.SupportsPUT() {
-				statusCode, entity = n.MethodNotSupported()
+			if !target_node.SupportsPUT() {
+				statusCode, entity = target_node.MethodNotSupported()
 			}
 			// TODO: Parse the payload
 			payload := (interface{})(nil)
-			statusCode, entity, err = endpoint.PUT(payload, parent, id)
+			statusCode, entity, err = target_node.PUT(payload, parent_entity, id)
 		default:
 			// TODO: Prepare a 405 response
 			entity = nil
@@ -127,14 +124,13 @@ func InternalServerError(message string) *RESP {
 	return r
 }
 
-func (n *Node) crawl(path []string, id string, parent interface{}) (endpoint *Node, endpointParent interface{}, endpointID string, err error) {
-
+func (n *Node) Resolve(path []string, id string, parent interface{}) (endpoint *Node, endpointParent interface{}, endpointID string, err error) {
 	if len(path) == 0 || (len(path) == 1 && len(path[0]) == 0) {
+		// This is either the end of the path, so return what we have.
 		return n, parent, id, nil
 	}
 	var child *Child
 	if n.ID_Child != nil {
-		println("GOT ID CHILD: ", n.ID_Child.Node.EntityType.Name())
 		child = n.ID_Child
 	} else if c, ok := (*n.Children)[path[0]]; !ok {
 		return n, nil, "", Error404(path[0])
@@ -142,14 +138,15 @@ func (n *Node) crawl(path []string, id string, parent interface{}) (endpoint *No
 		child = c
 	}
 
-	if this_entity, err := n.Methods.Manifest(parent, id); err != nil {
+	// Now, we manifest the current node's entity, to use as the parent for
+	// the next (child) node.
+	if entity, err := n.Methods.Manifest(parent, id); err != nil {
 		return nil, nil, "", err
-	} else if this_entity == nil {
+	} else if entity == nil {
+		// This node does not exist, so we can't move to the child.
 		return nil, nil, "", nil
-	} else if _, err := child.Node.Methods.Manifest(this_entity, id); err != nil {
-		return nil, nil, "", err
 	} else {
-		return child.Node.crawl(path[1:], path[0], this_entity)
+		return child.Node.Resolve(path[1:], path[0], entity)
 	}
 }
 
@@ -228,7 +225,7 @@ type HttpNode interface {
 	SupportsPATCH() bool
 	SupportsPOST() bool
 	ServeHTTP(http.ResponseWriter, *http.Request)
-	GET(interface{}, interface{}, string) (int, interface{}, error)
+	GET(interface{}, string) (int, interface{}, error)
 	PUT(interface{}, interface{}, string) (int, interface{}, error)
 	DELETE(interface{}, interface{}, string) (int, interface{}, error)
 	//PATCH(interface{}, interface{}, string) (int, interface{}, error)
@@ -251,7 +248,7 @@ func (n *Node) SupportsGET() bool {
 	return n.Methods.Manifest != nil
 }
 
-func (n *Node) GET(_ interface{}, parent interface{}, id string) (int, interface{}, error) {
+func (n *Node) GET(parent interface{}, id string) (int, interface{}, error) {
 	if entity, err := n.Methods.Manifest(parent, id); err != nil {
 		return 500, nil, err
 	} else if entity == nil {
@@ -310,20 +307,20 @@ type Child struct {
 	Kind reflect.Kind
 }
 
-func (n *Node) DeclareParentType(method string, parent reflect.Type) error {
+func (n *Node) AssertParentType(methodName string, parent reflect.Type) error {
 	if n.ParentType == nil {
-		return Error(n, " has no parent, but method ", method, " demands one.")
+		return Error(n, " has no parent, but method ", methodName, " demands one.")
 	} else if n.ParentType != parent {
-		return Error(n.EntityType.Name(), " has parent type ", n.ParentType, " but method ", method, " asks for parent type ", parent)
+		return Error(n.EntityType.Name(), " has parent type ", n.ParentType, " but method ", methodName, " asks for parent type ", parent)
 	}
 	return nil
 }
 
-func (n *Node) DeclareIdentity(isIdentity bool) error {
+func (n *Node) AssertIdentity(isIdentity bool) error {
 	if n.IsIdentity == nil {
 		n.IsIdentity = &isIdentity
 	} else if isIdentity != n.IsID() {
-		return Error(n.EntityType, "has inconsistent methods. Either all must accept a string parameter, or none.")
+		return Error(n.EntityType, " has inconsistent methods. Either all must accept a string parameter, or none.")
 	}
 	return nil
 }
@@ -361,168 +358,338 @@ type Delete_C func(interface{}, string, interface{}) error
 // Params: parent, id, self, input
 type Process_C func(interface{}, string, interface{}, interface{}) (interface{}, error)
 
+//
+// User method specs
+//
+type user_methods struct {
+	Exists   Exists_U
+	Manifest Manifest_U
+	Validate Validate_U
+	Write    Write_U
+	Delete   Delete_U
+	Process  Process_U
+}
+
+var user_methods_T = reflect.TypeOf(user_methods{})
+
+type Exists_U func(interface{}, interface{}, string) (bool, error)
+type Manifest_U func(interface{}, interface{}, string) error
+type Validate_U func(interface{}, interface{}, string) error
+type Write_U func(interface{}, interface{}, string) error
+type Delete_U func(interface{}, interface{}, string) error
+type Process_U func(interface{}, interface{}, string, interface{}) (interface{}, error)
+
+func makeExists(s StandardMethod) Exists_C {
+	return func(parent interface{}, id string) (bool, error) {
+		_, trueOrFalse, _, err := s(nil, parent, id, nil)
+		return *trueOrFalse, err
+	}
+}
+
+func makeManifest(s StandardMethod) Manifest_C {
+	return func(parent interface{}, id string) (interface{}, error) {
+		entity, _, _, err := s(nil, parent, id, nil)
+		return entity, err
+	}
+}
+
+func makeValidate(s StandardMethod) Validate_C {
+	return func(parent interface{}, id string, self interface{}) error {
+		_, _, _, err := s(self, parent, id, nil)
+		return err
+	}
+}
+
+func makeWrite(s StandardMethod) Write_C {
+	return func(parent interface{}, id string, self interface{}) error {
+		_, _, _, err := s(self, parent, id, nil)
+		return err
+	}
+}
+
+func makeDelete(s StandardMethod) Delete_C {
+	return func(parent interface{}, id string, self interface{}) error {
+		_, _, _, err := s(self, parent, id, nil)
+		return err
+	}
+}
+
+func makeProcess(s StandardMethod) Process_C {
+	return func(parent interface{}, id string, self interface{}, otherIn interface{}) (otherOut interface{}, err error) {
+		//_, _, otherOut, err = s(self, parent, id, otherIn)
+		// TODO: Implement this
+		panic("Process not implemented by the framework.")
+		return otherOut, err
+	}
+}
+
+func standardToCompiledMethod(name string, s StandardMethod) interface{} {
+	switch name {
+	case "Exists":
+		return makeExists(s)
+	case "Manifest":
+		return makeManifest(s)
+	case "Validate":
+		return makeValidate(s)
+	case "Write":
+		return makeWrite(s)
+	case "Delete":
+		return makeDelete(s)
+	case "Process":
+		return makeProcess(s)
+	default:
+		panic("Compiled method " + name + " not defined.")
+	}
+}
+
+var compiled_methods_T = reflect.TypeOf(compiled_methods{})
+
+type standardised_methods struct {
+	Exists   StandardMethod
+	Manifest StandardMethod
+	Validate StandardMethod
+	Write    StandardMethod
+	Delete   StandardMethod
+	Process  StandardMethod
+}
+
 func (n *Node) CompileMethods() error {
-	n.Methods = compiled_methods{}
-	if method, ok := n.EntityPtrType.MethodByName("Exists"); ok {
-		if m, err := n.CompileExistsMethod(method); err != nil {
+	compiled := reflect.ValueOf(&compiled_methods{})
+	numCompiled := compiled.Elem().NumField()
+	for i := 0; i < numCompiled; i++ {
+		name := compiled_methods_T.Field(i).Name
+		if s, err := n.CompileMethod(name); err != nil {
 			return err
 		} else {
-			n.Methods.Exists = m
+			standard := standardToCompiledMethod(name, s)
+			compiled.Elem().FieldByName(name).Set(reflect.ValueOf(standard))
 		}
 	}
-	if method, ok := n.EntityPtrType.MethodByName("Manifest"); ok {
-		if m, err := n.CompileManifestMethod(method); err != nil {
-			return err
-		} else {
-			n.Methods.Manifest = m
-		}
-	}
+	// TODO: Refactor (patched with ugly indirection)
+	n.Methods = *(compiled.Interface().(*compiled_methods))
 	// Validate method set
 	if n.Methods.Manifest == nil {
 		return Error("*"+fmt.Sprint(n.EntityType), " does not have a Manifest method")
 	}
 	// Apply patched exists method if none provided
 	if n.Methods.Exists == nil {
-		n.Methods.Exists = func(parent interface{}, id string) (bool, error) {
-			entity, err := n.Methods.Manifest(parent, id)
-			return entity != nil, err
-		}
+		n.Methods.Exists = convertManifestToExists(n.Methods.Manifest)
 	}
 	return nil
 }
 
-func (n *Node) CompileExistsMethod(method reflect.Method) (Exists_C, error) {
-	if err := n.ValidateExistsMethod(method); err != nil {
-		return nil, err
+func convertManifestToExists(m Manifest_C) Exists_C {
+	return func(parent interface{}, id string) (bool, error) {
+		entity, err := m(parent, id)
+		return entity != nil, err
 	}
-	// These are bound once, outside the function, since Exists
-	// always starts with nil and doesn't write to receiver
-	receiver := reflect.New(n.EntityType)
-	zeroBoundFunc := receiver.MethodByName("Exists")
-	numIn := method.Type.NumIn()
-	f := func(parent interface{}, id string) (bool, error) {
-		in := makeInParams(parent, id, numIn)
-		out := zeroBoundFunc.Call(in)
-		var err error
-		if !out[1].IsNil() {
-			err = out[1].Interface().(error)
-		}
-		return out[0].Bool(), err
-	}
-	return f, nil
 }
 
-func makeInParams(parent interface{}, id string, numIn int) []reflect.Value {
-	numIn--
-	in := make([]reflect.Value, numIn)
-	if numIn > 0 {
-		in[0] = reflect.ValueOf(parent)
+func (n *Node) CompileMethod(name string) (StandardMethod, error) {
+	if compiledMethod_F, ok := user_methods_T.FieldByName(name); !ok {
+		panic("Compiled methods does not have a member named " + name)
+	} else if userMethod_M, ok := n.EntityPtrType.MethodByName(name); !ok {
+		return nil, nil
+	} else {
+		compiledMethod_T := compiledMethod_F.Type
+		userMethod_T := userMethod_M.Type
+
+		if inMaker, err := n.analyseInputs(name, compiledMethod_T, userMethod_T); err != nil {
+			return nil, err
+		} else if outMaker, err := n.analyseOutputs(name, compiledMethod_T, userMethod_T); err != nil {
+			return nil, err
+		} else {
+			return n.makeStandardMethod(name, inMaker, outMaker), nil
+		}
 	}
-	if numIn > 1 {
-		in[1] = reflect.ValueOf(id)
-	}
-	return in
 }
 
-func (n *Node) CompileManifestMethod(method reflect.Method) (Manifest_C, error) {
-	if err := n.ValidateManifestMethod(method); err != nil {
-		return nil, err
-	}
-	numIn := method.Type.NumIn()
-	f := func(parent interface{}, id string) (interface{}, error) {
-		// println("Executing " + n.EntityType.Name() + ".Manifest(" + fmt.Sprint(parent) + ", '" + id + "')")
-		// println("...which has", numIn, "inputs")
-		// println("...of which the first is... ", method.Type.In(0).Elem().Name())
-		receiver := reflect.New(n.EntityType)
-		method := receiver.MethodByName("Manifest")
-		in := makeInParams(parent, id, numIn)
-		//println("...and we got", len(in), "inputs")
-		out := method.Call(in)
-		var entity interface{}
-		var err error
-		if !out[0].IsNil() {
-			err = out[0].Interface().(error)
+type StandardMethod func(
+	selfIn interface{},
+	parent interface{},
+	id string,
+	posted func(reflect.Type) (interface{}, error),
+) (
+	selfOut interface{},
+	trueOrFalse *bool,
+	otherEntity interface{},
+	err error,
+)
+
+func (n *Node) makeStandardMethod(name string, inMaker *inputMaker, outMaker *outputMaker) StandardMethod {
+	//     func(self interface{}, parent interface{}, id string, posted func(reflect.Type) (interface{}, error)) (selfOut interface{}, trueOrFalse *bool, otherEntity interface{}, err error)
+	return func(self interface{}, parent interface{}, id string, posted func(reflect.Type) (interface{}, error)) (selfOut interface{}, trueOrFalse *bool, otherEntity interface{}, err error) {
+		if in, err := inMaker.makeInputs(self, parent, id, posted); err != nil {
+			return nil, nil, nil, err
+		} else {
+			if self == nil {
+				self = reflect.New(n.EntityType).Interface()
+			}
+			println("Getting method " + n.EntityType.Name() + "." + name)
+			println("--- in == " + fmt.Sprint(in))
+			method := reflect.ValueOf(self).MethodByName(name)
+			out := method.Call(in)
+			return outMaker.makeOutputs(self, out)
 		}
-		if !receiver.IsNil() {
-			entity = receiver.Interface()
-		}
-		return entity, err
 	}
-	return f, nil
 }
 
-// All methods have the same input requirements. They all take either
-// their parent, or that plus a string (i.e. ID)
-func (n *Node) ValidateInputs(methodName string, method reflect.Method) error {
-	//println(n.EntityType.Name()+"."+methodName+" has ", method.Type.NumIn(), " params")
-	// Ignore the receiver for now.
-	numIn := method.Type.NumIn() - 1
-	if n.ParentType == nil {
-		if numIn != 0 {
-			// This is the root node, no inputs allowed
-			return Error("Root node '", n, "' should not have any inputs on its ", methodName, " method.")
-		}
-		if err := n.DeclareIdentity(false); err != nil {
-			return err
-		}
-		return nil
-	}
-	if numIn == 0 {
-		if err := n.DeclareIdentity(false); err != nil {
-			return err
-		}
-		return nil // Objection! Overruled. I'm going to allow this.
-	}
-	if numIn != 1 && numIn != 2 {
-		return Error(n.EntityType, ".", methodName, " should have 1 or 2 input parameters")
-	}
-	if err := n.DeclareParentType(methodName, method.Type.In(1)); err != nil {
-		return err
-	}
-	if numIn == 2 {
-		if method.Type.In(2).Kind() != reflect.String {
-			return Error(n.EntityType, "")
-		} else if err := n.DeclareIdentity(true); err != nil {
-			return err
-		}
-	} else if err := n.DeclareIdentity(false); err != nil {
-		return err
-	}
-	return nil
+type inputMaker struct {
+	ParentRequired     bool
+	IdRequired         bool
+	PostedBodyRequired bool
+	PostedBodyType     reflect.Type
 }
 
-func (n *Node) ValidateManifestMethod(method reflect.Method) error {
-	if err := n.ValidateInputs("Manifest", method); err != nil {
-		return err
+func (im *inputMaker) makeInputs(maybeNonNilSelf interface{}, parent interface{}, id string, posted func(reflect.Type) (interface{}, error)) ([]reflect.Value, error) {
+	inputs := []reflect.Value{}
+	if im.ParentRequired {
+		inputs = append(inputs, reflect.ValueOf(parent))
 	}
-	detached := method.Func.Type()
-	numOut := detached.NumOut()
-	if numOut != 1 {
-		return Error(n.EntityType, ".Manifest should have 1 output parameter")
+	if im.IdRequired {
+		inputs = append(inputs, reflect.ValueOf(id))
 	}
-	out0 := detached.Out(0)
-	if !out0.Implements(error_T) {
-		return Error(n.EntityType, ".Manifest output parameter should implement error.")
+	if im.PostedBodyRequired {
+		if body, err := posted(im.PostedBodyType); err != nil {
+			return nil, err
+		} else {
+			inputs = append(inputs, reflect.ValueOf(body))
+		}
 	}
-	return nil
+	return inputs, nil
 }
 
-func (n *Node) ValidateExistsMethod(method reflect.Method) error {
-	if err := n.ValidateInputs("Exists", method); err != nil {
-		return err
+func (n *Node) analyseInputs(methodName string, compiledMethod_T reflect.Type, userMethod_T reflect.Type) (*inputMaker, error) {
+	im := &inputMaker{}
+	// inSpec is the order and type of *allowed* inputs (parameters)
+	_, specMaxIn := readMethodInputs(compiledMethod_T)
+	// actualIn is the order and type of the actual inputs
+	actualIn, actualNumIn := readMethodInputs(userMethod_T)
+
+	// TODO: Clean this up (I just patched it by skipping the first inputs)
+	//inSpec = inSpec[1:]
+	//specMaxIn = len(inSpec)
+	actualIn = actualIn[1:]
+	actualNumIn = len(actualIn)
+
+	// Validate Inputs
+	if actualNumIn > specMaxIn {
+		return nil, n.methodError(methodName, "should have at most", specMaxIn, "parameter(s).")
 	}
-	detached := method.Func.Type()
-	numOut := detached.NumOut()
-	if numOut != 2 {
-		return Error(n.EntityType, ".Exists should have 2 output parameters")
+	if actualNumIn < 2 {
+		if err := n.AssertIdentity(false); err != nil {
+			return nil, err
+		}
 	}
-	out1 := detached.Out(0)
-	if out1.Kind() != reflect.Bool {
-		return Error(n.EntityType, ".Exists first output parameter should be bool")
+	for i, actualT := range actualIn {
+		if i == 0 {
+			im.ParentRequired = true
+			if err := n.AssertParentType(methodName, actualT); err != nil {
+				return nil, err
+			}
+		} else if i == 1 {
+			im.IdRequired = true
+			if err := n.AssertIdentity(true); err != nil {
+				return nil, err
+			}
+		} else if i == 2 {
+			im.PostedBodyRequired = true
+			im.PostedBodyType = actualT
+		}
 	}
-	out2 := detached.Out(1)
-	if out2.Implements(error_T) {
-		return Error(n.EntityType, ".Exists second output parameter should implement error.")
+	return im, nil
+}
+
+type outputMaker struct {
+	EntityRequired      bool
+	TrueOrFalseRequired bool
+	OtherEntityRequired bool
+	ErrorRequired       bool
+}
+
+func (om *outputMaker) makeOutputs(receiver interface{}, outVals []reflect.Value) (self interface{}, trueOrFalse *bool, otherEntity interface{}, err error) {
+	//if om.EntityRequired {
+	self = receiver
+	//}
+	i := 0
+	if om.TrueOrFalseRequired {
+		b := outVals[i].Bool()
+		trueOrFalse = &b
+		i++
 	}
-	return nil
+	if om.OtherEntityRequired {
+		otherEntity = outVals[i].Interface()
+		i++
+	}
+	if om.ErrorRequired {
+		e := outVals[i]
+		if !e.IsNil() {
+			err = e.Interface().(error)
+		}
+		i++
+	}
+	return self, trueOrFalse, otherEntity, err
+}
+
+func (n *Node) analyseOutputs(name string, expectedMethod_T reflect.Type, userMethod_T reflect.Type) (*outputMaker, error) {
+	// outSpec is the order and type of *required* outputs, plus one
+	// extra at the start for the entity itself.
+	expectedOutSpec, expectedNumOut := readMethodOutputs(expectedMethod_T)
+
+	// // Skip the first output as that will be read as the method receiver (i.e. the entity)
+	// expectedOutSpec := outSpec[1:]
+	// expectedNumOut := len(expectedOutSpec)
+
+	// actualOut is the order and type of the actual outputs
+	actualOut, actualNumOut := readMethodOutputs(userMethod_T)
+
+	// Validate Outputs
+	if actualNumOut != expectedNumOut {
+		return nil, n.methodError(name, "should have", expectedNumOut, "outputs.")
+	}
+	om := &outputMaker{}
+	gotEntity := false
+	for i, expectedT := range expectedOutSpec {
+		if actualOut[i] != expectedT {
+			return nil, n.methodError(name, ": output", i, "should by of type", expectedT)
+		}
+		if !gotEntity && expectedT == n.EntityType {
+			om.EntityRequired = true
+			gotEntity = true
+		} else if expectedT == error_T {
+			om.ErrorRequired = true
+		} else if expectedT.Kind() == reflect.Bool {
+			om.TrueOrFalseRequired = true
+		} else {
+			om.OtherEntityRequired = true
+		}
+	}
+	return om, nil
+}
+
+func (n *Node) methodError(name string, args ...interface{}) error {
+	parts := list{}
+	for _, a := range args {
+		parts.Add(fmt.Sprint(a))
+	}
+	message := strings.Join(parts, " ")
+	return Error("*" + n.EntityType.Name() + "." + name + " " + message)
+}
+
+func readMethodInputs(t reflect.Type) ([]reflect.Type, int) {
+	numIn := t.NumIn()
+	types := make([]reflect.Type, numIn)
+	for i := 0; i < numIn; i++ {
+		types[i] = t.In(i)
+	}
+	return types, numIn
+}
+
+func readMethodOutputs(t reflect.Type) ([]reflect.Type, int) {
+	numOut := t.NumOut()
+	types := make([]reflect.Type, numOut)
+	for i := 0; i < numOut; i++ {
+		types[i] = t.Out(i)
+	}
+	return types, numOut
 }

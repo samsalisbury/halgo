@@ -15,28 +15,15 @@ var error_T = reflect.TypeOf((*error)(nil)).Elem()
 
 func (root *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.Split(r.URL.Path[1:], "/")
-	if target_node, parent_entity, id, err := root.Resolve(path, "", nil); err != nil {
-		w.WriteHeader(500)
-	} else {
-		var statusCode int
-		var entity interface{}
-		switch r.Method {
-		case HEAD:
-			statusCode, entity, _ = target_node.GET(parent_entity, id)
-		case GET:
-			statusCode, entity, _ = target_node.GET(parent_entity, id)
-		case PUT:
-			if !target_node.SupportsPUT() {
-				statusCode, entity = target_node.MethodNotSupported()
-			}
-			// TODO: Parse the payload
-			payload := (interface{})(nil)
-			statusCode, entity, err = target_node.PUT(payload, parent_entity, id)
+	if statusCode, entity, err := root.serve(path, r); err != nil {
+		switch e := err.(type) {
+		//case HTTPError:
+		//TODO implement HTTP error handling
 		default:
-			// TODO: Prepare a 405 response
-			entity = nil
+			w.WriteHeader(500)
+			w.Write([]byte("INTERNAL SERVER ERROR: " + e.Error()))
 		}
-
+	} else {
 		w.WriteHeader(statusCode)
 		if body, err := json.MarshalIndent(entity, "", "\t"); err != nil {
 			panic("Unable to serialise entity: " + err.Error())
@@ -44,6 +31,47 @@ func (root *Node) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write(body)
 		}
 	}
+}
+
+func (root *Node) serve(path []string, r *http.Request) (int, interface{}, error) {
+	if statusCode, entity, err := root.serveMainEntity(path, r); err != nil {
+		return 0, nil, err
+	} else {
+		// TODO Manifest children
+		return statusCode, entity, err
+	}
+}
+
+func (root *Node) serveMainEntity(path []string, r *http.Request) (int, interface{}, error) {
+	if target_node, parent_entity, id, err := root.Resolve(path, "", nil); err != nil {
+		return 0, nil, err
+	} else if method, ok := target_node.HTTPMethods[r.Method]; !ok {
+		return 405, target_node.MethodNotSupportedBody(), nil
+	} else if err != nil {
+		return 0, nil, err
+	} else {
+		in := makeStdInputs(parent_entity, id, target_node, r)
+		return method.Invoke(&target_node.Methods, in)
+	}
+}
+
+func makeStdInputs(parent interface{}, id string, n *Node, r *http.Request) *StandardHTTPMethodInputs {
+	in := &StandardHTTPMethodInputs{Node: n}
+	if n.IsIdentity != nil && *n.IsIdentity {
+		in.ID = id
+	}
+	if parent != nil {
+		in.Parent = parent
+	}
+	return in
+}
+
+type StandardHTTPMethodInputs struct {
+	Node   HttpNode
+	Self   interface{}
+	Parent interface{}
+	ID     string
+	Posted func() interface{}
 }
 
 type list []string
@@ -56,7 +84,7 @@ func (l *list) String() string {
 	return strings.Join(*l, ", ")
 }
 
-func (n *Node) MethodNotSupported() (int, error) {
+func (n *Node) MethodNotSupportedBody() error {
 	supported := &list{}
 	if n.SupportsGET() {
 		supported.Add("HEAD")
@@ -74,7 +102,7 @@ func (n *Node) MethodNotSupported() (int, error) {
 	if n.SupportsPOST() {
 		supported.Add("POST")
 	}
-	return 405, Error("Supported Methods: ", supported)
+	return Error("Supported Methods: ", supported)
 }
 
 func processPutResponse(statusCode int, entity interface{}, err error) *RESP {
@@ -125,10 +153,13 @@ func InternalServerError(message string) *RESP {
 }
 
 func (n *Node) Resolve(path []string, id string, parent interface{}) (endpoint *Node, endpointParent interface{}, endpointID string, err error) {
+
 	if len(path) == 0 || (len(path) == 1 && len(path[0]) == 0) {
 		// This is either the end of the path, so return what we have.
 		return n, parent, id, nil
 	}
+
+	// Try to find the next child.
 	var child *Child
 	if n.ID_Child != nil {
 		child = n.ID_Child
@@ -163,7 +194,6 @@ func graph(t reflect.Type, parent reflect.Type) (HttpNode, error) {
 	} else if t.Kind() == reflect.Slice {
 		t = t.Elem()
 	}
-
 	n := &Node{EntityType: t, EntityPtrType: reflect.PtrTo(t), ParentType: parent}
 	if err := n.CompileMethods(); err != nil {
 		return nil, err
@@ -214,26 +244,22 @@ type Node struct {
 	Children      *map[string]*Child
 	IsIdentity    *bool
 	ID_Child      *Child
+	HTTPMethods   map[string]HTTPMethodDescriptor
 }
 
 type HttpNode interface {
 	Node() *Node
 	IsID() bool
-	SupportsGET() bool
-	SupportsPUT() bool
-	SupportsDELETE() bool
-	SupportsPATCH() bool
-	SupportsPOST() bool
+	M() compiled_methods
 	ServeHTTP(http.ResponseWriter, *http.Request)
-	GET(interface{}, string) (int, interface{}, error)
-	PUT(interface{}, interface{}, string) (int, interface{}, error)
-	DELETE(interface{}, interface{}, string) (int, interface{}, error)
-	//PATCH(interface{}, interface{}, string) (int, interface{}, error)
-	//POST(interface{}, interface{}, string) (int, interface{}, error)
 }
 
 func (n *Node) Node() *Node {
 	return n
+}
+
+func (n *Node) M() compiled_methods {
+	return n.Methods
 }
 
 func (n *Node) IsID() bool {
@@ -248,49 +274,11 @@ func (n *Node) SupportsGET() bool {
 	return n.Methods.Manifest != nil
 }
 
-func (n *Node) GET(parent interface{}, id string) (int, interface{}, error) {
-	if entity, err := n.Methods.Manifest(parent, id); err != nil {
-		return 500, nil, err
-	} else if entity == nil {
-		return 404, nil, nil
-	} else {
-		return 200, entity, nil
-	}
-}
-
 func (n *Node) SupportsPUT() bool {
 	return n.Methods.Write != nil
 }
-
-func (n *Node) PUT(payload interface{}, parent interface{}, id string) (int, interface{}, error) {
-	if exists, err := n.Methods.Exists(parent, id); err != nil {
-		return 500, nil, err
-	} else {
-		status := 201
-		if exists {
-			status = 200
-		}
-		if err := n.Methods.Write(payload, id, parent); err != nil {
-			return 500, nil, err
-		}
-		return status, payload, nil
-	}
-}
-
 func (n *Node) SupportsDELETE() bool {
 	return n.Methods.Delete != nil
-}
-
-func (n *Node) DELETE(null interface{}, parent interface{}, id string) (int, interface{}, error) {
-	if exists, err := n.Methods.Exists(parent, id); err != nil {
-		return 500, nil, err
-	} else if !exists {
-		return 404, nil, nil
-	} else if err := n.Methods.Delete(null, id, parent); err != nil {
-		return 500, nil, err
-	} else {
-		return 200, nil, nil
-	}
 }
 
 func (n *Node) SupportsPATCH() bool {
@@ -381,36 +369,36 @@ type Process_U func(interface{}, string, interface{}) (interface{}, error)
 
 func makeExists(s StandardMethod) Exists_C {
 	return func(parent interface{}, id string) (bool, error) {
-		_, trueOrFalse, _, err := s(nil, parent, id, nil)
-		return *trueOrFalse, err
+		out := s(&standardInputs{Parent: parent, ID: id})
+		return *out.TrueOrFalse, out.Error
 	}
 }
 
 func makeManifest(s StandardMethod) Manifest_C {
 	return func(parent interface{}, id string) (interface{}, error) {
-		entity, _, _, err := s(nil, parent, id, nil)
-		return entity, err
+		out := s(&standardInputs{Parent: parent, ID: id})
+		return out.Self, out.Error
 	}
 }
 
 func makeValidate(s StandardMethod) Validate_C {
 	return func(parent interface{}, id string, self interface{}) error {
-		_, _, _, err := s(self, parent, id, nil)
-		return err
+		out := s(&standardInputs{Self: self, Parent: parent, ID: id})
+		return out.Error
 	}
 }
 
 func makeWrite(s StandardMethod) Write_C {
 	return func(parent interface{}, id string, self interface{}) error {
-		_, _, _, err := s(self, parent, id, nil)
-		return err
+		out := s(&standardInputs{Self: self, Parent: parent, ID: id})
+		return out.Error
 	}
 }
 
 func makeDelete(s StandardMethod) Delete_C {
 	return func(parent interface{}, id string, self interface{}) error {
-		_, _, _, err := s(self, parent, id, nil)
-		return err
+		out := s(&standardInputs{Self: self, Parent: parent, ID: id})
+		return out.Error
 	}
 }
 
@@ -475,6 +463,13 @@ func (n *Node) CompileMethods() error {
 	if n.Methods.Exists == nil {
 		n.Methods.Exists = convertManifestToExists(n.Methods.Manifest)
 	}
+	// Generate Basic set of HTTP methods
+	n.HTTPMethods = map[string]HTTPMethodDescriptor{}
+	for k, v := range methodTemplates {
+		if v.IsSupported(&n.Methods) {
+			n.HTTPMethods[k] = v
+		}
+	}
 	return nil
 }
 
@@ -504,29 +499,33 @@ func (n *Node) CompileMethod(name string) (StandardMethod, error) {
 	}
 }
 
-type StandardMethod func(
-	selfIn interface{},
-	parent interface{},
-	id string,
-	posted func(reflect.Type) (interface{}, error),
-) (
-	selfOut interface{},
-	trueOrFalse *bool,
-	otherEntity interface{},
-	err error,
-)
+type StandardMethod func(*standardInputs) *standardOutputs
+
+type standardInputs struct {
+	Self   interface{}
+	Parent interface{}
+	ID     string
+	Posted func(reflect.Type) (interface{}, error)
+}
+
+type standardOutputs struct {
+	Self        interface{}
+	TrueOrFalse *bool
+	OtherEntity interface{}
+	Error       error
+}
 
 func (n *Node) makeStandardMethod(name string, inMaker *inputMaker, outMaker *outputMaker) StandardMethod {
-	return func(self interface{}, parent interface{}, id string, posted func(reflect.Type) (interface{}, error)) (selfOut interface{}, trueOrFalse *bool, otherEntity interface{}, err error) {
-		if in, err := inMaker.makeInputs(self, parent, id, posted); err != nil {
-			return nil, nil, nil, err
+	return func(i *standardInputs) *standardOutputs {
+		if in, err := inMaker.makeInputs(i); err != nil {
+			return &standardOutputs{Error: err}
 		} else {
-			if self == nil {
-				self = reflect.New(n.EntityType).Interface()
+			if i.Self == nil {
+				i.Self = reflect.New(n.EntityType).Interface()
 			}
-			method := reflect.ValueOf(self).MethodByName(name)
+			method := reflect.ValueOf(i.Self).MethodByName(name)
 			out := method.Call(in)
-			return outMaker.makeOutputs(self, out)
+			return outMaker.makeOutputs(i.Self, out)
 		}
 	}
 }
@@ -538,16 +537,16 @@ type inputMaker struct {
 	PostedBodyType     reflect.Type
 }
 
-func (im *inputMaker) makeInputs(maybeNonNilSelf interface{}, parent interface{}, id string, posted func(reflect.Type) (interface{}, error)) ([]reflect.Value, error) {
+func (im *inputMaker) makeInputs(in *standardInputs) ([]reflect.Value, error) {
 	inputs := []reflect.Value{}
 	if im.ParentRequired {
-		inputs = append(inputs, reflect.ValueOf(parent))
+		inputs = append(inputs, reflect.ValueOf(in.Parent))
 	}
 	if im.IdRequired {
-		inputs = append(inputs, reflect.ValueOf(id))
+		inputs = append(inputs, reflect.ValueOf(in.ID))
 	}
 	if im.PostedBodyRequired {
-		if body, err := posted(im.PostedBodyType); err != nil {
+		if body, err := in.Posted(im.PostedBodyType); err != nil {
 			return nil, err
 		} else {
 			inputs = append(inputs, reflect.ValueOf(body))
@@ -602,26 +601,27 @@ type outputMaker struct {
 	ErrorRequired       bool
 }
 
-func (om *outputMaker) makeOutputs(receiver interface{}, outVals []reflect.Value) (self interface{}, trueOrFalse *bool, otherEntity interface{}, err error) {
-	self = receiver
+func (om *outputMaker) makeOutputs(receiver interface{}, outVals []reflect.Value) *standardOutputs {
+	out := &standardOutputs{}
+	out.Self = receiver
 	i := 0
 	if om.TrueOrFalseRequired {
 		b := outVals[i].Bool()
-		trueOrFalse = &b
+		out.TrueOrFalse = &b
 		i++
 	}
 	if om.OtherEntityRequired {
-		otherEntity = outVals[i].Interface()
+		out.OtherEntity = outVals[i].Interface()
 		i++
 	}
 	if om.ErrorRequired {
 		e := outVals[i]
 		if !e.IsNil() {
-			err = e.Interface().(error)
+			out.Error = e.Interface().(error)
 		}
 		i++
 	}
-	return self, trueOrFalse, otherEntity, err
+	return out
 }
 
 func (n *Node) analyseOutputs(name string, expectedMethod_T reflect.Type, userMethod_T reflect.Type) (*outputMaker, error) {

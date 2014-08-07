@@ -63,32 +63,6 @@ func makeChildren(t reflect.Type) (map[string]*child, *child, error) {
 	return children, nil, nil
 }
 
-func fieldInfo(f reflect.StructField) field_info {
-	t := f.Type
-	k := t.Kind()
-	// Is the field a pointer to something?
-	if k == reflect.Ptr {
-		t = t.Elem()
-	}
-	// We allow child resources to be pointers, maps, slices, and pointers
-	// to maps/slices. Thus, after the pointer test, we keep resolving in
-	// case it was the latter.
-	if t.Kind() == reflect.Map {
-		keyKind := t.Key().Kind()
-		return field_info{t.Kind(), t.Elem(), &keyKind}
-	} else if t.Kind() == reflect.Slice {
-		return field_info{t.Kind(), t.Elem(), nil}
-	} else {
-		return field_info{k, t, nil}
-	}
-}
-
-type field_info struct {
-	Kind           reflect.Kind
-	UnderlyingType reflect.Type
-	KeyKind        *reflect.Kind
-}
-
 func makeChild(f reflect.StructField) (*child, bool, error) {
 	fi := fieldInfo(f)
 	if !hasNamedGetMethod(fi.UnderlyingType) {

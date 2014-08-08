@@ -24,11 +24,19 @@ func (entity *Apps) Manifest() error {
 	return nil
 }
 
+func (entity *Apps) Collection() (AppsList, error) {
+	return nil, nil
+}
+
 func (entity *App) Manifest(parent *Apps, id string) error {
 	if app, ok := parent.Apps[id]; ok {
 		(*entity) = app
 	}
 	return nil
+}
+
+func (entity *App) Collection(parent *Apps, id string) (map[string]AppVersion, error) {
+	return the_apps[id].Versions, nil
 }
 
 // Manifest should try to find and load the entity. If any parents are missing,

@@ -51,11 +51,11 @@ func serialise(a interface{}) []byte {
 
 func (root *Node) serve(r *http.Request) (int, interface{}, error) {
 	target_href := strings.Split(r.URL.String(), "?")[0]
-	if n, statusCode, entity, err := root.serveMainEntity(r); err != nil {
+	if n, statusCode, entity, id, err := root.serveMainEntity(r); err != nil {
 		return 0, nil, err
 	} else if m, err := toMap(entity); err != nil {
 		return 0, nil, err
-	} else if children, err := n.manifestChildren(entity, target_href); err != nil {
+	} else if children, err := n.manifestChildren(entity, id, target_href); err != nil {
 		return 0, nil, err
 	} else {
 		return statusCode, resource{Entity: *m, Embedded: children, Links: nil}, err
@@ -79,43 +79,58 @@ type resource struct {
 	Links    map[string]interface{}
 }
 
-func (n *Node) manifestChildren(parent interface{}, parent_href string) (map[string]interface{}, error) {
+func (n *Node) manifestChildren(parent interface{}, id string, parent_href string) (map[string]interface{}, error) {
 	parent_href = strings.TrimSuffix(parent_href, "/")
 	children := map[string]interface{}{}
-	for k, c := range *n.Children {
-		switch c.Meta.expansion.expansion_type {
-		case href:
-			children[k] = map[string]string{"href": parent_href + "/" + k}
-		case all:
-			println("Expanding " + parent_href + "/" + k)
-			child_node, _, _, _ := n.Resolve([]string{k}, "", parent)
-			_, child, err := child_node.HTTPMethods["GET"].Invoke(&child_node.Methods, &StandardHTTPMethodInputs{Parent: parent, ID: k})
-			if err != nil {
-				children[k] = err
-			} else {
-				children[k] = child
+	if n.Children == nil {
+		if n.ID_Child != nil {
+			if n.Methods.Collection == nil {
+				children[n.ID_Child.CollectionName] = n.EntityType.Name() + " does not have a Collection method."
 			}
-		case fields:
-			children[k] = "fields tag not yet supported."
-		default:
-			children[k] = fmt.Sprintf("Child type %v not recognised.", c.Meta.expansion.expansion_type)
+			if collection, err := n.Methods.Collection(parent, id); err != nil {
+				children[n.ID_Child.CollectionName] = err
+			} else {
+				children[n.ID_Child.CollectionName] = collection
+			}
+		} else {
+			return children, nil
 		}
+	} else {
+		for k, c := range *n.Children {
+			switch c.Meta.expansion.expansion_type {
+			case href:
+				children[k] = map[string]string{"href": parent_href + "/" + k}
+			case all:
+				child_node, _, _, _ := n.Resolve([]string{k}, "", parent)
+				_, child, err := child_node.HTTPMethods["GET"].Invoke(&child_node.Methods, &StandardHTTPMethodInputs{Parent: parent, ID: k})
+				if err != nil {
+					children[k] = err
+				} else {
+					children[k] = child
+				}
+			case fields:
+				children[k] = "fields tag not yet supported."
+			default:
+				children[k] = fmt.Sprintf("Child type %v not recognised.", c.Meta.expansion.expansion_type)
+			}
+		}
+		return children, nil
 	}
-	return children, nil
+	return nil, nil
 }
 
-func (root *Node) serveMainEntity(r *http.Request) (*Node, int, interface{}, error) {
+func (root *Node) serveMainEntity(r *http.Request) (*Node, int, interface{}, string, error) {
 	path := strings.Split(r.URL.Path[1:], "/")
 	if target_node, parent_entity, id, err := root.Resolve(path, "", nil); err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, "", err
 	} else if method, ok := target_node.HTTPMethods[r.Method]; !ok {
-		return nil, 405, target_node.MethodNotSupportedBody(), nil
+		return nil, 405, target_node.MethodNotSupportedBody(), "", nil
 	} else if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, "", err
 	} else {
 		in := makeStdInputs(parent_entity, id, target_node, r)
 		statusCode, entity, err := method.Invoke(&target_node.Methods, in)
-		return target_node, statusCode, entity, err
+		return target_node, statusCode, entity, id, err
 	}
 }
 
@@ -246,10 +261,10 @@ func InternalServerError(message string) *RESP {
 }
 
 func Graph(root interface{}) (HttpNode, error) {
-	return graph(reflect.TypeOf(root), nil)
+	return graph(reflect.TypeOf(root), nil, nil)
 }
 
-func graph(t reflect.Type, parent reflect.Type) (HttpNode, error) {
+func graph(t reflect.Type, parent reflect.Type, parentNode *Node) (HttpNode, error) {
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -258,42 +273,57 @@ func graph(t reflect.Type, parent reflect.Type) (HttpNode, error) {
 	} else if t.Kind() == reflect.Slice {
 		t = t.Elem()
 	}
-	n := &Node{EntityType: t, EntityPtrType: reflect.PtrTo(t), ParentType: parent}
+	n := &Node{EntityType: t, EntityPtrType: reflect.PtrTo(t), ParentType: parent, ParentNode: parentNode}
 	if err := n.CompileMethods(); err != nil {
 		return nil, err
 	} else if err := n.AddChildren(); err != nil {
 		return nil, err
 	}
+
+	if n.ID_Child != nil {
+		if comp, err := n.CompileMethod("Collection"); err != nil {
+			return nil, err
+		} else {
+			n.Methods.Collection = makeCollection(n, comp)
+		}
+	}
+
 	return n, nil
 }
 
 func (n *Node) AddChildren() error {
 	members := map[string]*Child{}
-	collections := []*Child{}
+	var idChild *Child
+	var idChildName string
 	numFields := n.EntityType.NumField()
 	for i := 0; i < numFields; i++ {
 		f := n.EntityType.Field(i)
 		if meta, err := getMetadata(f); err != nil {
 			return err
 		} else if meta.expansion != nil {
-			if childNode, err := graph(f.Type, n.EntityPtrType); err != nil {
+			if childNode, err := graph(f.Type, n.EntityPtrType, n); err != nil {
 				return err
 			} else {
-				c := &Child{childNode.Node(), meta, f.Type.Kind()}
+				c := &Child{childNode.Node(), meta, f.Type.Kind(), ""}
+				childName := strings.ToLower(f.Name)
 				if childNode.IsID() {
-					collections = append(collections, c)
+					if idChild != nil {
+						return Error(n, "contains more than one collection child")
+					}
+					idChild = c
+					idChildName = childName
+					c.CollectionName = childName
 				} else {
-					members[strings.ToLower(f.Name)] = c
+					members[childName] = c
 				}
 			}
 		}
 	}
-	if len(collections) > 1 {
-		return Error(n, "contains more than one collection child")
-	} else if len(collections) == 1 && len(members) != 0 {
+	if idChild != nil && len(members) != 0 {
 		return Error(n, "contains a collection child and named members")
-	} else if len(collections) == 1 {
-		n.ID_Child = collections[0]
+	} else if idChild != nil {
+		n.ID_Child = idChild
+		n.ID_Child.CollectionName = idChildName
 	} else {
 		n.Children = &members
 	}
@@ -305,6 +335,7 @@ type Node struct {
 	EntityPtrType reflect.Type
 	Methods       compiled_methods
 	ParentType    reflect.Type
+	ParentNode    *Node
 	Children      *map[string]*Child
 	IsIdentity    *bool
 	ID_Child      *Child
@@ -354,9 +385,15 @@ func (n *Node) SupportsPOST() bool {
 }
 
 type Child struct {
-	Node *Node
-	Meta meta
-	Kind reflect.Kind
+	Node           *Node
+	Meta           meta
+	Kind           reflect.Kind
+	CollectionName string
+}
+
+type IDChild struct {
+	Child
+	CollectionName string
 }
 
 func (n *Node) AssertParentType(methodName string, parent reflect.Type) error {
@@ -378,12 +415,13 @@ func (n *Node) AssertIdentity(isIdentity bool) error {
 }
 
 type compiled_methods struct {
-	Exists   Exists_C
-	Manifest Manifest_C
-	Validate Validate_C
-	Write    Write_C
-	Delete   Delete_C
-	Process  Process_C
+	Exists     Exists_C
+	Manifest   Manifest_C
+	Collection Collection_C
+	Validate   Validate_C
+	Write      Write_C
+	Delete     Delete_C
+	Process    Process_C
 }
 
 // Exists may be specified to optimise the situation where manifesting a resource
@@ -394,6 +432,8 @@ type Exists_C func(interface{}, string) (bool, error)
 // Manifest == GET, also used for HEAD
 // Params: parent, id
 type Manifest_C func(interface{}, string) (interface{}, error)
+
+type Collection_C func(interface{}, string) (interface{}, error)
 
 // Params: parent, id, self
 type Validate_C func(interface{}, string, interface{}) error
@@ -414,59 +454,68 @@ type Process_C func(interface{}, string, interface{}, interface{}) (interface{},
 // User method specs
 //
 type user_methods struct {
-	Exists   Exists_U
-	Manifest Manifest_U
-	Validate Validate_U
-	Write    Write_U
-	Delete   Delete_U
-	Process  Process_U
+	Exists     Exists_U
+	Manifest   Manifest_U
+	Collection Collection_U
+	Validate   Validate_U
+	Write      Write_U
+	Delete     Delete_U
+	Process    Process_U
 }
 
 var user_methods_T = reflect.TypeOf(user_methods{})
 
 type Exists_U func(interface{}, string) (bool, error)
 type Manifest_U func(interface{}, string) error
+type Collection_U func(interface{}, string) (interface{}, error)
 type Validate_U func(interface{}, string) error
 type Write_U func(interface{}, string) error
 type Delete_U func(interface{}, string) error
 type Process_U func(interface{}, string, interface{}) (interface{}, error)
 
-func makeExists(s StandardMethod) Exists_C {
+func makeExists(n *Node, s StandardMethod) Exists_C {
 	return func(parent interface{}, id string) (bool, error) {
 		out := s(&standardInputs{Parent: parent, ID: id})
 		return *out.TrueOrFalse, out.Error
 	}
 }
 
-func makeManifest(s StandardMethod) Manifest_C {
+func makeManifest(n *Node, s StandardMethod) Manifest_C {
 	return func(parent interface{}, id string) (interface{}, error) {
 		out := s(&standardInputs{Parent: parent, ID: id})
 		return out.Self, out.Error
 	}
 }
 
-func makeValidate(s StandardMethod) Validate_C {
+func makeCollection(n *Node, s StandardMethod) Collection_C {
+	return func(parent interface{}, id string) (interface{}, error) {
+		out := s(&standardInputs{Parent: parent, ID: id})
+		return out.Self, out.Error
+	}
+}
+
+func makeValidate(n *Node, s StandardMethod) Validate_C {
 	return func(parent interface{}, id string, self interface{}) error {
 		out := s(&standardInputs{Self: self, Parent: parent, ID: id})
 		return out.Error
 	}
 }
 
-func makeWrite(s StandardMethod) Write_C {
+func makeWrite(n *Node, s StandardMethod) Write_C {
 	return func(parent interface{}, id string, self interface{}) error {
 		out := s(&standardInputs{Self: self, Parent: parent, ID: id})
 		return out.Error
 	}
 }
 
-func makeDelete(s StandardMethod) Delete_C {
+func makeDelete(n *Node, s StandardMethod) Delete_C {
 	return func(parent interface{}, id string, self interface{}) error {
 		out := s(&standardInputs{Self: self, Parent: parent, ID: id})
 		return out.Error
 	}
 }
 
-func makeProcess(s StandardMethod) Process_C {
+func makeProcess(n *Node, s StandardMethod) Process_C {
 	return func(parent interface{}, id string, self interface{}, otherIn interface{}) (otherOut interface{}, err error) {
 		//_, _, otherOut, err = s(self, parent, id, otherIn)
 		// TODO: Implement this
@@ -475,20 +524,22 @@ func makeProcess(s StandardMethod) Process_C {
 	}
 }
 
-func standardToCompiledMethod(name string, s StandardMethod) interface{} {
+func standardToCompiledMethod(n *Node, name string, s StandardMethod) interface{} {
 	switch name {
 	case "Exists":
-		return makeExists(s)
+		return makeExists(n, s)
 	case "Manifest":
-		return makeManifest(s)
+		return makeManifest(n, s)
+	case "Collection":
+		return makeCollection(n, s)
 	case "Validate":
-		return makeValidate(s)
+		return makeValidate(n, s)
 	case "Write":
-		return makeWrite(s)
+		return makeWrite(n, s)
 	case "Delete":
-		return makeDelete(s)
+		return makeDelete(n, s)
 	case "Process":
-		return makeProcess(s)
+		return makeProcess(n, s)
 	default:
 		panic("Compiled method " + name + " not defined.")
 	}
@@ -497,12 +548,13 @@ func standardToCompiledMethod(name string, s StandardMethod) interface{} {
 var compiled_methods_T = reflect.TypeOf(compiled_methods{})
 
 type standardised_methods struct {
-	Exists   StandardMethod
-	Manifest StandardMethod
-	Validate StandardMethod
-	Write    StandardMethod
-	Delete   StandardMethod
-	Process  StandardMethod
+	Exists     StandardMethod
+	Manifest   StandardMethod
+	Collection StandardMethod
+	Validate   StandardMethod
+	Write      StandardMethod
+	Delete     StandardMethod
+	Process    StandardMethod
 }
 
 func (n *Node) CompileMethods() error {
@@ -512,8 +564,10 @@ func (n *Node) CompileMethods() error {
 		name := compiled_methods_T.Field(i).Name
 		if s, err := n.CompileMethod(name); err != nil {
 			return err
+		} else if s == nil {
+			continue
 		} else {
-			standard := standardToCompiledMethod(name, s)
+			standard := standardToCompiledMethod(n, name, s)
 			compiled.Elem().FieldByName(name).Set(reflect.ValueOf(standard))
 		}
 	}
@@ -521,7 +575,10 @@ func (n *Node) CompileMethods() error {
 	n.Methods = *(compiled.Interface().(*compiled_methods))
 	// Validate method set
 	if n.Methods.Manifest == nil {
-		return Error("*"+fmt.Sprint(n.EntityType), " does not have a Manifest method")
+		return n.typeError("does not have a Manifest method")
+	}
+	if n.IsID() && n.ParentNode.Methods.Collection == nil {
+		return n.ParentNode.typeError("should have a Collection method because its child relies on an ID")
 	}
 	// Apply patched exists method if none provided
 	if n.Methods.Exists == nil {
@@ -552,7 +609,6 @@ func (n *Node) CompileMethod(name string) (StandardMethod, error) {
 	} else {
 		compiledMethod_T := compiledMethod_F.Type
 		userMethod_T := userMethod_M.Type
-
 		if inMaker, err := n.analyseInputs(name, compiledMethod_T, userMethod_T); err != nil {
 			return nil, err
 		} else if outMaker, err := n.analyseOutputs(name, compiledMethod_T, userMethod_T); err != nil {
@@ -688,6 +744,8 @@ func (om *outputMaker) makeOutputs(receiver interface{}, outVals []reflect.Value
 	return out
 }
 
+var interface_T = reflect.TypeOf((*interface{})(nil)).Elem()
+
 func (n *Node) analyseOutputs(name string, expectedMethod_T reflect.Type, userMethod_T reflect.Type) (*outputMaker, error) {
 	// outSpec is the order and type of *required* outputs, plus one
 	// extra at the start for the entity itself.
@@ -703,8 +761,8 @@ func (n *Node) analyseOutputs(name string, expectedMethod_T reflect.Type, userMe
 	om := &outputMaker{}
 	gotEntity := false
 	for i, expectedT := range expectedOutSpec {
-		if actualOut[i] != expectedT {
-			return nil, n.methodError(name, ": output", i, "should by of type", expectedT)
+		if expectedT != interface_T && actualOut[i] != expectedT {
+			return nil, n.methodError(name, ": output", i, "should be of type", expectedT)
 		}
 		if !gotEntity && expectedT == n.EntityType {
 			om.EntityRequired = true
@@ -717,6 +775,10 @@ func (n *Node) analyseOutputs(name string, expectedMethod_T reflect.Type, userMe
 			om.OtherEntityRequired = true
 		}
 	}
+	if name == "Collection" {
+		om.OtherEntityRequired = true
+		om.EntityRequired = false
+	}
 	return om, nil
 }
 
@@ -727,6 +789,15 @@ func (n *Node) methodError(name string, args ...interface{}) error {
 	}
 	message := strings.Join(parts, " ")
 	return Error("*" + n.EntityType.Name() + "." + name + " " + message)
+}
+
+func (n *Node) typeError(args ...interface{}) error {
+	parts := list{}
+	for _, a := range args {
+		parts.Add(fmt.Sprint(a))
+	}
+	message := strings.Join(parts, " ")
+	return Error("*" + n.EntityType.Name() + " " + message)
 }
 
 func readMethodInputs(t reflect.Type) ([]reflect.Type, int) {
